@@ -22,6 +22,6 @@ public class Client {
     private String email;
     private String phone;
 
-    @OneToMany
+    @OneToMany(mappedBy = "client")
     private Set<Policy> policies;
 }
