@@ -17,7 +17,10 @@ public class Policy {
     private Long id;
 
     private String type;
+
+    @Enumerated(EnumType.STRING)
     private Status status;
+
     private String policyNumber;
     private Double premium;
     private Date startDate;
