@@ -10,5 +10,4 @@ import java.util.Optional;
 public interface PolicyRepository extends JpaRepository<Policy, Long> {
     public Optional<Policy> findByPolicyNumber(String policyNumber);
     public List<Policy> findByClient(Client client);
-    void delete(Long id);
 }
