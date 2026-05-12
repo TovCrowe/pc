@@ -1,12 +1,13 @@
 package com.pc.pc.controller;
 
-import com.pc.pc.entity.Client;
+import com.pc.pc.dto.ClientRequestDTO;
+import com.pc.pc.dto.ClientResponseDTO;
 import com.pc.pc.service.ClientService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
-import java.util.Optional;
 
 @RestController
 @RequestMapping("/clients")
@@ -15,22 +16,30 @@ public class ClientController {
     private final ClientService clientService;
 
     @GetMapping
-    public List<Client> findAll() {
-        return clientService.findAll();
+    public ResponseEntity<List<ClientResponseDTO>> findAll() {
+        return ResponseEntity.ok(clientService.findAll());
     }
 
     @GetMapping("/{id}")
-    public Optional<Client> findById(@PathVariable Long id) {
-        return clientService.findById(id);
+    public ResponseEntity<ClientResponseDTO> findById(@PathVariable Long id) {
+        return clientService.findById(id)
+                .map(ResponseEntity::ok)
+                .orElse(ResponseEntity.notFound().build());
     }
 
     @PostMapping
-    public Client save(@RequestBody Client client) {
-        return clientService.save(client);
+    public ResponseEntity<ClientResponseDTO> save(@RequestBody ClientRequestDTO dto) {
+        return ResponseEntity.status(201).body(clientService.save(dto));
+    }
+
+    @PutMapping("/{id}")
+    public ResponseEntity<ClientResponseDTO> update(@PathVariable Long id, @RequestBody ClientRequestDTO dto) {
+        return ResponseEntity.ok(clientService.update(id, dto));
     }
 
     @DeleteMapping("/{id}")
-    public void delete(@PathVariable long id) {
+    public ResponseEntity<Void> delete(@PathVariable Long id) {
         clientService.delete(id);
+        return ResponseEntity.noContent().build();
     }
 }

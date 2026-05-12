@@ -1,6 +1,6 @@
 # Policy Management API
 
-A RESTful API built with Spring Boot for managing insurance clients and their policies. This project is a practical reference for learning the core patterns of a Spring Boot application: layered architecture, JPA, dependency injection, and REST controllers.
+A RESTful API built with Spring Boot for managing insurance clients and their policies. This project is a practical reference for learning the core patterns of a Spring Boot application: layered architecture, JPA, dependency injection, DTOs, and REST controllers.
 
 ---
 
@@ -11,7 +11,7 @@ A RESTful API built with Spring Boot for managing insurance clients and their po
 | **Spring Boot 4.0.6** | The framework. Auto-configures everything and runs the app via an embedded Tomcat server — no WAR deployment needed. |
 | **Spring Web** | Provides `@RestController`, `@GetMapping`, etc. to build REST endpoints. |
 | **Spring Data JPA** | Abstracts database access. You define an interface and Spring generates the SQL queries for you. |
-| **Spring Security** | Adds authentication/authorization. Currently included but not customized — all endpoints require HTTP Basic Auth by default. |
+| **Spring Security** | Adds authentication/authorization. Configured with HTTP Basic Auth and an in-memory user. |
 | **Spring Validation** | Lets you annotate entity fields with rules like `@NotNull`, `@Size`, `@Email`, etc. |
 | **Lombok** | Generates boilerplate Java (getters, setters, constructors) at compile time via annotations. |
 | **H2** | An in-memory database used in development. Data is lost when the app stops. |
@@ -25,6 +25,15 @@ A RESTful API built with Spring Boot for managing insurance clients and their po
 src/main/java/com/pc/pc/
 │
 ├── PcApplication.java          # Entry point — contains main(), starts Spring Boot
+│
+├── config/
+│   └── SecurityConfig.java     # Spring Security configuration
+│
+├── dto/                        # Data Transfer Objects — what the API sends and receives
+│   ├── ClientRequestDTO.java
+│   ├── ClientResponseDTO.java
+│   ├── PolicyRequestDTO.java
+│   └── PolicyResponseDTO.java
 │
 ├── entity/                     # JPA Entities — map directly to database tables
 │   ├── Client.java
@@ -51,9 +60,9 @@ src/main/java/com/pc/pc/
 ```
 HTTP Request
     ↓
-Controller   →   receives the request, calls the service
+Controller   →   receives the RequestDTO, calls the service
     ↓
-Service      →   contains business logic, calls the repository
+Service      →   maps DTO → Entity, calls the repository, maps Entity → ResponseDTO
     ↓
 Repository   →   talks to the database
     ↓
@@ -75,7 +84,7 @@ Each layer only knows about the one directly below it. This keeps concerns separ
 | `lastName` | String | Last name |
 | `email` | String | Contact email |
 | `phone` | String | Phone number |
-| `policies` | Set\<Policy\> | Policies owned by this client |
+| `policies` | Set\<Policy\> | Policies owned by this client (not exposed via API) |
 
 ### Policy — `policies` table
 
@@ -100,6 +109,51 @@ Client (1) ──────── (N) Policy
 
 - In `Client.java`: `@OneToMany(mappedBy = "client")` — "I have many policies; the `client` field in Policy owns the foreign key column."
 - In `Policy.java`: `@ManyToOne` + `@JoinColumn(name = "client_id")` — "I belong to one client and I store the foreign key as `client_id`."
+
+---
+
+## DTOs (Data Transfer Objects)
+
+The API never exposes JPA entities directly. Instead it uses DTOs — plain classes that carry only the data needed for each operation. This avoids infinite recursion from the bidirectional `Client ↔ Policy` relationship and decouples the API contract from the database model.
+
+### Request DTOs (what comes IN)
+
+| DTO | Fields |
+|---|---|
+| `ClientRequestDTO` | `name`, `lastName`, `email`, `phone` |
+| `PolicyRequestDTO` | `type`, `status`, `policyNumber`, `premium`, `startDate`, `endDate`, `clientId` |
+
+No `id` on request DTOs — the database generates it on insert, and the URL provides it on update.
+
+### Response DTOs (what goes OUT)
+
+| DTO | Fields |
+|---|---|
+| `ClientResponseDTO` | `id`, `name`, `lastName`, `email`, `phone` |
+| `PolicyResponseDTO` | `id`, `type`, `status`, `policyNumber`, `premium`, `startDate`, `endDate`, `clientId`, `clientName` |
+
+`PolicyResponseDTO` flattens the client relationship into `clientId` and `clientName` instead of embedding the full `Client` object.
+
+### How mapping works in the service
+
+Each service has two private helper methods that handle the conversion:
+
+```java
+// DTO → Entity (used in save and update)
+private Client toEntity(ClientRequestDTO dto) {
+    Client client = new Client();
+    client.setName(dto.getName());
+    // ...
+    return client;
+}
+
+// Entity → DTO (used before returning to the controller)
+private ClientResponseDTO toResponse(Client client) {
+    return new ClientResponseDTO(
+        client.getId(), client.getName(), ...
+    );
+}
+```
 
 ---
 
@@ -128,15 +182,16 @@ Spring builds a graph of all beans (objects it manages) and wires them together.
 @OneToMany(mappedBy = "client") // One client → many policies
 @ManyToOne                      // Many policies → one client
 @JoinColumn(name = "client_id") // The FK column name in the policies table
+@Enumerated(EnumType.STRING)    // Stores enum as "ACTIVE" instead of 0, 1, 2...
 ```
 
 ### Lombok Annotations
 
 ```java
-@Data            // Shortcut: generates getters, setters, equals, hashCode, and toString
-@NoArgsConstructor   // Required by JPA — entities need a no-args constructor
-@AllArgsConstructor  // Constructor with all fields
-@RequiredArgsConstructor  // Constructor for final fields — used for dependency injection
+@Data                    // Generates getters, setters, equals, hashCode, and toString
+@NoArgsConstructor       // Required by JPA — entities need a no-args constructor
+@AllArgsConstructor      // Constructor with all fields — useful for creating DTOs
+@RequiredArgsConstructor // Constructor for final fields — used for dependency injection
 ```
 
 ### Repositories (Spring Data JPA)
@@ -164,42 +219,41 @@ List<Policy> findByClient(Client client);
 // Spring generates: SELECT * FROM policies WHERE client_id = ?
 ```
 
-### Services
+### Security (`SecurityConfig.java`)
 
 ```java
-@Service                // Marks this as a Spring-managed service bean
-@RequiredArgsConstructor
-public class ClientService {
-    private final ClientRepository clientRepository;
+@Configuration
+@EnableWebSecurity
+public class SecurityConfig {
 
-    public List<Client> findAll() {
-        return clientRepository.findAll();  // delegates to JPA
+    @Bean
+    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
+        http
+            .csrf(csrf -> csrf.disable())           // REST APIs don't need CSRF protection
+            .headers(h -> h.frameOptions(...))      // Allow H2 console (runs in an iframe)
+            .authorizeHttpRequests(auth -> auth
+                .requestMatchers("/h2-console/**").permitAll()
+                .anyRequest().authenticated()       // everything else requires login
+            )
+            .httpBasic(basic -> {});                // use HTTP Basic Auth
+        return http.build();
     }
-}
-```
 
-Services are where business logic lives. Right now they delegate directly to the repository, but this is where you'd add things like: "don't delete a client that has active policies."
+    @Bean
+    public UserDetailsService userDetailsService(PasswordEncoder encoder) {
+        // in-memory user — replace with DB-backed UserDetailsService later
+        var user = User.builder()
+            .username("admin")
+            .password(encoder.encode("admin123"))
+            .roles("ADMIN")
+            .build();
+        return new InMemoryUserDetailsManager(user);
+    }
 
-### Controllers (REST)
-
-```java
-@RestController              // Combines @Controller + @ResponseBody; methods return JSON
-@RequestMapping("/clients")  // Base URL path for all methods in this controller
-public class ClientController {
-
-    @GetMapping              // Handles: GET /clients
-    public List<Client> findAll() { ... }
-
-    @GetMapping("/{id}")     // Handles: GET /clients/{id}
-    public Optional<Client> findById(@PathVariable Long id) { ... }
-    //                                ↑ binds the {id} in the URL to this parameter
-
-    @PostMapping             // Handles: POST /clients
-    public Client save(@RequestBody Client client) { ... }
-    //                 ↑ deserializes the JSON body into a Client object
-
-    @DeleteMapping("/{id}")  // Handles: DELETE /clients/{id}
-    public void delete(@PathVariable long id) { ... }
+    @Bean
+    public PasswordEncoder passwordEncoder() {
+        return new BCryptPasswordEncoder();  // hashes passwords — never store plain text
+    }
 }
 ```
 
@@ -207,29 +261,52 @@ public class ClientController {
 
 ## API Endpoints
 
+All endpoints require HTTP Basic Auth: **username** `admin`, **password** `admin123`.
+
 ### Clients — `/clients`
 
-| Method | URL | Description |
-|---|---|---|
-| GET | `/clients` | Get all clients |
-| GET | `/clients/{id}` | Get a client by ID |
-| POST | `/clients` | Create a new client |
-| DELETE | `/clients/{id}` | Delete a client by ID |
+| Method | URL | Body | Status | Description |
+|---|---|---|---|---|
+| GET | `/clients` | — | `200 OK` | Get all clients |
+| GET | `/clients/{id}` | — | `200 OK` / `404 Not Found` | Get a client by ID |
+| POST | `/clients` | `ClientRequestDTO` | `201 Created` | Create a new client |
+| PUT | `/clients/{id}` | `ClientRequestDTO` | `200 OK` | Update an existing client |
+| DELETE | `/clients/{id}` | — | `204 No Content` | Delete a client by ID |
 
 ### Policies — `/policies`
 
-| Method | URL | Description |
-|---|---|---|
-| GET | `/policies` | Get all policies |
-| GET | `/policies/{id}` | Get a policy by ID |
-| POST | `/policies` | Create a new policy |
-| DELETE | `/policies/{id}` | Delete a policy by ID |
+| Method | URL | Body | Status | Description |
+|---|---|---|---|---|
+| GET | `/policies` | — | `200 OK` | Get all policies |
+| GET | `/policies/{id}` | — | `200 OK` / `404 Not Found` | Get a policy by ID |
+| POST | `/policies` | `PolicyRequestDTO` | `201 Created` | Create a new policy |
+| PUT | `/policies/{id}` | `PolicyRequestDTO` | `200 OK` | Update an existing policy |
+| DELETE | `/policies/{id}` | — | `204 No Content` | Delete a policy by ID |
+
+### HTTP Status Codes
+
+Controllers return `ResponseEntity` to give proper HTTP status codes on every response:
+
+```java
+// 200 OK — found
+return clientService.findById(id)
+        .map(ResponseEntity::ok)           // 200 with body
+        .orElse(ResponseEntity.notFound().build());  // 404 with no body
+
+// 201 Created — new resource
+return ResponseEntity.status(201).body(clientService.save(dto));
+
+// 204 No Content — deleted, nothing to return
+clientService.delete(id);
+return ResponseEntity.noContent().build();
+```
 
 ### Example Requests
 
 **Create a client:**
 ```http
 POST /clients
+Authorization: Basic YWRtaW46YWRtaW4xMjM=
 Content-Type: application/json
 
 {
@@ -240,9 +317,21 @@ Content-Type: application/json
 }
 ```
 
+**Response:**
+```json
+{
+  "id": 1,
+  "name": "Victor",
+  "lastName": "Tovar",
+  "email": "victor@example.com",
+  "phone": "555-1234"
+}
+```
+
 **Create a policy linked to client ID 1:**
 ```http
 POST /policies
+Authorization: Basic YWRtaW46YWRtaW4xMjM=
 Content-Type: application/json
 
 {
@@ -252,8 +341,28 @@ Content-Type: application/json
   "premium": 150.00,
   "startDate": "2026-01-01",
   "endDate": "2027-01-01",
-  "client": { "id": 1 }
+  "clientId": 1
 }
+```
+
+**Response:**
+```json
+{
+  "id": 1,
+  "type": "auto",
+  "status": "ACTIVE",
+  "policyNumber": "POL-001",
+  "premium": 150.00,
+  "startDate": "2026-01-01",
+  "endDate": "2027-01-01",
+  "clientId": 1,
+  "clientName": "Victor"
+}
+```
+
+**With curl:**
+```bash
+curl -u admin:admin123 http://localhost:8080/clients
 ```
 
 ---
@@ -274,10 +383,6 @@ The app starts in `dev` profile by default (`spring.profiles.active=dev` in `app
 - H2 Console (browser): `http://localhost:8080/h2-console`
   - JDBC URL: `jdbc:h2:mem:policydb`
   - Username: `sa` | Password: *(leave empty)*
-
-> **Note:** Spring Security is active. On startup, look for a line like:
-> `Using generated security password: <some-uuid>`
-> Use `user` as the username and that UUID as the password for requests, or disable security for now.
 
 ### Production mode (PostgreSQL)
 
@@ -300,24 +405,6 @@ Spring profiles let you have different configs per environment without changing 
 | `application.properties` | (base) | — | Sets active profile |
 | `application-dev.properties` | `dev` | H2 in-memory | Recreated on each start (`create-drop`) |
 | `application-prod.properties` | `prod` | PostgreSQL | Migrated on start (`update`) |
-
----
-
-## Things to Improve (Learning Notes)
-
-These are real issues in the current code worth fixing as next steps:
-
-1. **Spring Security is blocking everything** — Security is included but not configured. You need to either add a `SecurityFilterChain` bean to define your rules, or temporarily disable it with `spring.security.enabled=false` in `application-dev.properties`.
-
-2. **Missing PUT endpoint** — Neither controller has an update method. In JPA, `save(entity)` handles both insert and update: if the entity has an `id`, it updates; otherwise it inserts. Adding `@PutMapping("/{id}")` is the next step.
-
-3. **Return `ResponseEntity` for proper HTTP status codes** — Right now controllers return raw objects. Wrapping in `ResponseEntity` lets you return `201 Created` on POST, `404 Not Found` when nothing is found, and `204 No Content` on DELETE.
-
-4. **Use DTOs (Data Transfer Objects)** — The controllers expose entities directly. The bidirectional `Client ↔ Policy` relationship (`Client` has `policies`, `Policy` has `client`) will cause **infinite recursion** during JSON serialization. A DTO breaks the cycle and gives you control over what the API exposes.
-
-5. **`@Enumerated(EnumType.STRING)` on Status** — Without this annotation, JPA stores enum values as integers (0, 1, 2...) in the DB. Add `@Enumerated(EnumType.STRING)` to `Policy.status` so it stores `"ACTIVE"` instead of `0`.
-
-6. **`PolicyRepository.delete(Long id)` is incorrect** — `JpaRepository.delete()` takes an entity object, not an ID. This method signature won't work as expected. Remove it and use `deleteById(Long id)`, which is already provided by `JpaRepository` and used correctly in `PolicyService`.
 
 ---
 
