@@ -3,12 +3,12 @@ package com.pc.pc.service;
 import com.pc.pc.dto.ClientRequestDTO;
 import com.pc.pc.dto.ClientResponseDTO;
 import com.pc.pc.entity.Client;
+import com.pc.pc.exception.ResourceNotFoundException;
 import com.pc.pc.repository.ClientRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
-import java.util.Optional;
 
 @Service
 @RequiredArgsConstructor
@@ -21,8 +21,10 @@ public class ClientService {
                 .toList();
     }
 
-    public Optional<ClientResponseDTO> findById(Long id) {
-        return clientRepository.findById(id).map(this::toResponse);
+    public ClientResponseDTO findById(Long id) {
+        return clientRepository.findById(id)
+                .map(this::toResponse)
+                .orElseThrow(() -> new ResourceNotFoundException("Client", id));
     }
 
     public ClientResponseDTO save(ClientRequestDTO dto) {

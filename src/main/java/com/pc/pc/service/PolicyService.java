@@ -4,13 +4,13 @@ import com.pc.pc.dto.PolicyRequestDTO;
 import com.pc.pc.dto.PolicyResponseDTO;
 import com.pc.pc.entity.Client;
 import com.pc.pc.entity.Policy;
+import com.pc.pc.exception.ResourceNotFoundException;
 import com.pc.pc.repository.ClientRepository;
 import com.pc.pc.repository.PolicyRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
-import java.util.Optional;
 
 @Service
 @RequiredArgsConstructor
@@ -25,8 +25,10 @@ public class PolicyService {
                 .toList();
     }
 
-    public Optional<PolicyResponseDTO> findById(Long id) {
-        return policyRepository.findById(id).map(this::toResponse);
+    public PolicyResponseDTO findById(Long id) {
+        return policyRepository.findById(id)
+                .map(this::toResponse)
+                .orElseThrow(() -> new ResourceNotFoundException("Policy", id));
     }
 
     public PolicyResponseDTO save(PolicyRequestDTO dto) {
@@ -45,7 +47,7 @@ public class PolicyService {
 
     private Policy toEntity(PolicyRequestDTO dto) {
         Client client = clientRepository.findById(dto.getClientId())
-                .orElseThrow(() -> new RuntimeException("Client not found: " + dto.getClientId()));
+                .orElseThrow(() -> new ResourceNotFoundException("Client", dto.getClientId()));
 
         Policy policy = new Policy();
         policy.setType(dto.getType());

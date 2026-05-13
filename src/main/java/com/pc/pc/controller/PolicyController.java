@@ -22,9 +22,7 @@ public class PolicyController {
 
     @GetMapping("/{id}")
     public ResponseEntity<PolicyResponseDTO> findById(@PathVariable Long id) {
-        return policyService.findById(id)
-                .map(ResponseEntity::ok)
-                .orElse(ResponseEntity.notFound().build());
+        return ResponseEntity.ok(policyService.findById(id));
     }
 
     @PostMapping

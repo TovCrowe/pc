@@ -42,6 +42,11 @@ src/main/java/com/pc/pc/
 ├── enums/
 │   └── Status.java             # Enum for policy status values
 │
+├── exception/                  # Error handling
+│   ├── ResourceNotFoundException.java  # Thrown when a Client or Policy ID doesn't exist
+│   ├── ErrorResponse.java              # JSON body returned on every error
+│   └── GlobalExceptionHandler.java     # @RestControllerAdvice — catches exceptions globally
+│
 ├── repository/                 # Data access layer — interfaces that talk to the DB
 │   ├── ClientRepository.java
 │   └── PolicyRepository.java
@@ -288,10 +293,8 @@ All endpoints require HTTP Basic Auth: **username** `admin`, **password** `admin
 Controllers return `ResponseEntity` to give proper HTTP status codes on every response:
 
 ```java
-// 200 OK — found
-return clientService.findById(id)
-        .map(ResponseEntity::ok)           // 200 with body
-        .orElse(ResponseEntity.notFound().build());  // 404 with no body
+// 200 OK — found (service throws ResourceNotFoundException if not found)
+return ResponseEntity.ok(clientService.findById(id));
 
 // 201 Created — new resource
 return ResponseEntity.status(201).body(clientService.save(dto));
@@ -300,6 +303,8 @@ return ResponseEntity.status(201).body(clientService.save(dto));
 clientService.delete(id);
 return ResponseEntity.noContent().build();
 ```
+
+404 and 500 errors are handled globally — see [Exception Handling](#exception-handling) below.
 
 ### Example Requests
 
@@ -364,6 +369,64 @@ Content-Type: application/json
 ```bash
 curl -u admin:admin123 http://localhost:8080/clients
 ```
+
+---
+
+## Exception Handling
+
+All errors return a consistent JSON body instead of stack traces. The three classes in `exception/` work together:
+
+### `ResourceNotFoundException`
+
+A custom unchecked exception thrown by the service layer when a lookup fails:
+
+```java
+// In PolicyService — when clientId doesn't exist
+clientRepository.findById(dto.getClientId())
+        .orElseThrow(() -> new ResourceNotFoundException("Client", id));
+// message: "Client not found with id: 5"
+```
+
+### `ErrorResponse`
+
+A Java record that defines the JSON shape of every error response:
+
+```java
+public record ErrorResponse(int status, String error, String message, LocalDateTime timestamp) {}
+```
+
+```json
+{
+  "status": 404,
+  "error": "Not Found",
+  "message": "Policy not found with id: 99",
+  "timestamp": "2026-05-13T10:30:00"
+}
+```
+
+### `GlobalExceptionHandler`
+
+`@RestControllerAdvice` intercepts exceptions thrown anywhere in the controller layer and maps them to `ResponseEntity<ErrorResponse>`:
+
+```java
+@RestControllerAdvice
+public class GlobalExceptionHandler {
+
+    @ExceptionHandler(ResourceNotFoundException.class)
+    public ResponseEntity<ErrorResponse> handleNotFound(ResourceNotFoundException ex) {
+        return ResponseEntity.status(404)
+                .body(ErrorResponse.of(404, "Not Found", ex.getMessage()));
+    }
+
+    @ExceptionHandler(Exception.class)
+    public ResponseEntity<ErrorResponse> handleGeneric(Exception ex) {
+        return ResponseEntity.status(500)
+                .body(ErrorResponse.of(500, "Internal Server Error", "An unexpected error occurred"));
+    }
+}
+```
+
+The catch-all `Exception` handler ensures unexpected errors never leak a stack trace to the client.
 
 ---
 

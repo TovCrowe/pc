@@ -22,9 +22,7 @@ public class ClientController {
 
     @GetMapping("/{id}")
     public ResponseEntity<ClientResponseDTO> findById(@PathVariable Long id) {
-        return clientService.findById(id)
-                .map(ResponseEntity::ok)
-                .orElse(ResponseEntity.notFound().build());
+        return ResponseEntity.ok(clientService.findById(id));
     }
 
     @PostMapping
