@@ -3,6 +3,7 @@ package com.pc.pc.controller;
 import com.pc.pc.dto.PolicyRequestDTO;
 import com.pc.pc.dto.PolicyResponseDTO;
 import com.pc.pc.service.PolicyService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -26,12 +27,12 @@ public class PolicyController {
     }
 
     @PostMapping
-    public ResponseEntity<PolicyResponseDTO> save(@RequestBody PolicyRequestDTO dto) {
+    public ResponseEntity<PolicyResponseDTO> save(@Valid @RequestBody PolicyRequestDTO dto) {
         return ResponseEntity.status(201).body(policyService.save(dto));
     }
 
     @PutMapping("/{id}")
-    public ResponseEntity<PolicyResponseDTO> update(@PathVariable Long id, @RequestBody PolicyRequestDTO dto) {
+    public ResponseEntity<PolicyResponseDTO> update(@PathVariable Long id, @Valid @RequestBody PolicyRequestDTO dto) {
         return ResponseEntity.ok(policyService.update(id, dto));
     }
 

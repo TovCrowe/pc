@@ -130,6 +130,8 @@ The API never exposes JPA entities directly. Instead it uses DTOs — plain clas
 
 No `id` on request DTOs — the database generates it on insert, and the URL provides it on update.
 
+Request DTOs also carry validation constraints (see [Validation](#validation) below).
+
 ### Response DTOs (what goes OUT)
 
 | DTO | Fields |
@@ -274,8 +276,8 @@ All endpoints require HTTP Basic Auth: **username** `admin`, **password** `admin
 |---|---|---|---|---|
 | GET | `/clients` | — | `200 OK` | Get all clients |
 | GET | `/clients/{id}` | — | `200 OK` / `404 Not Found` | Get a client by ID |
-| POST | `/clients` | `ClientRequestDTO` | `201 Created` | Create a new client |
-| PUT | `/clients/{id}` | `ClientRequestDTO` | `200 OK` | Update an existing client |
+| POST | `/clients` | `ClientRequestDTO` | `201 Created` / `400 Bad Request` | Create a new client |
+| PUT | `/clients/{id}` | `ClientRequestDTO` | `200 OK` / `400 Bad Request` | Update an existing client |
 | DELETE | `/clients/{id}` | — | `204 No Content` | Delete a client by ID |
 
 ### Policies — `/policies`
@@ -284,8 +286,8 @@ All endpoints require HTTP Basic Auth: **username** `admin`, **password** `admin
 |---|---|---|---|---|
 | GET | `/policies` | — | `200 OK` | Get all policies |
 | GET | `/policies/{id}` | — | `200 OK` / `404 Not Found` | Get a policy by ID |
-| POST | `/policies` | `PolicyRequestDTO` | `201 Created` | Create a new policy |
-| PUT | `/policies/{id}` | `PolicyRequestDTO` | `200 OK` | Update an existing policy |
+| POST | `/policies` | `PolicyRequestDTO` | `201 Created` / `400 Bad Request` | Create a new policy |
+| PUT | `/policies/{id}` | `PolicyRequestDTO` | `200 OK` / `400 Bad Request` | Update an existing policy |
 | DELETE | `/policies/{id}` | — | `204 No Content` | Delete a policy by ID |
 
 ### HTTP Status Codes
@@ -372,6 +374,52 @@ curl -u admin:admin123 http://localhost:8080/clients
 
 ---
 
+## Validation
+
+Request DTOs are annotated with Jakarta Validation constraints. The controller methods use `@Valid` to trigger validation before the request reaches the service layer.
+
+### `ClientRequestDTO`
+
+| Field | Constraint | Rule |
+|---|---|---|
+| `name` | `@NotBlank` | Must not be null or empty |
+| `lastName` | `@NotBlank` | Must not be null or empty |
+| `email` | `@NotBlank` + `@Email` | Must not be empty and must be a valid email format |
+| `phone` | `@NotBlank` | Must not be null or empty |
+
+### `PolicyRequestDTO`
+
+| Field | Constraint | Rule |
+|---|---|---|
+| `type` | `@NotBlank` | Must not be null or empty |
+| `policyNumber` | `@NotBlank` | Must not be null or empty |
+| `status` | `@NotNull` | Must be provided (`ACTIVE`, `INACTIVE`, `PENDING`, or `CANCELLED`) |
+| `premium` | `@NotNull` | Must be provided |
+| `startDate` | `@NotNull` | Must be provided |
+| `endDate` | `@NotNull` | Must be provided |
+| `clientId` | `@NotNull` | Must be provided |
+
+### How it works
+
+```java
+// Controller — @Valid triggers constraint checks before the method body runs
+@PostMapping
+public ResponseEntity<ClientResponseDTO> save(@Valid @RequestBody ClientRequestDTO dto) { ... }
+```
+
+If any constraint fails, Spring throws `MethodArgumentNotValidException` before the service is called. `GlobalExceptionHandler` catches it and returns a `400 Bad Request` listing every failing field:
+
+```json
+{
+  "status": 400,
+  "error": "Bad Request",
+  "message": "email: must be a well-formed email address, name: must not be blank",
+  "timestamp": "2026-05-14T10:00:00"
+}
+```
+
+---
+
 ## Exception Handling
 
 All errors return a consistent JSON body instead of stack traces. The three classes in `exception/` work together:
@@ -418,6 +466,15 @@ public class GlobalExceptionHandler {
                 .body(ErrorResponse.of(404, "Not Found", ex.getMessage()));
     }
 
+    @ExceptionHandler(MethodArgumentNotValidException.class)
+    public ResponseEntity<ErrorResponse> handleValidation(MethodArgumentNotValidException ex) {
+        String message = ex.getBindingResult().getFieldErrors().stream()
+                .map(e -> e.getField() + ": " + e.getDefaultMessage())
+                .collect(Collectors.joining(", "));
+        return ResponseEntity.status(400)
+                .body(ErrorResponse.of(400, "Bad Request", message));
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ErrorResponse> handleGeneric(Exception ex) {
         return ResponseEntity.status(500)
@@ -426,7 +483,7 @@ public class GlobalExceptionHandler {
 }
 ```
 
-The catch-all `Exception` handler ensures unexpected errors never leak a stack trace to the client.
+The `MethodArgumentNotValidException` handler returns a `400` with all failing field names and messages. The catch-all `Exception` handler ensures unexpected errors never leak a stack trace to the client.
 
 ---
 

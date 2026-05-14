@@ -3,6 +3,7 @@ package com.pc.pc.controller;
 import com.pc.pc.dto.ClientRequestDTO;
 import com.pc.pc.dto.ClientResponseDTO;
 import com.pc.pc.service.ClientService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -26,12 +27,12 @@ public class ClientController {
     }
 
     @PostMapping
-    public ResponseEntity<ClientResponseDTO> save(@RequestBody ClientRequestDTO dto) {
+    public ResponseEntity<ClientResponseDTO> save(@Valid @RequestBody ClientRequestDTO dto) {
         return ResponseEntity.status(201).body(clientService.save(dto));
     }
 
     @PutMapping("/{id}")
-    public ResponseEntity<ClientResponseDTO> update(@PathVariable Long id, @RequestBody ClientRequestDTO dto) {
+    public ResponseEntity<ClientResponseDTO> update(@PathVariable Long id, @Valid @RequestBody ClientRequestDTO dto) {
         return ResponseEntity.ok(clientService.update(id, dto));
     }
 
