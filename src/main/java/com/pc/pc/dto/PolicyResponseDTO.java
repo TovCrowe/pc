@@ -12,7 +12,11 @@ import java.util.Date;
 @AllArgsConstructor
 public class PolicyResponseDTO {
     private Long id;
-    private String type;
+    private String vehicleMake;
+    private String vehicleModel;
+    private Integer vehicleYear;
+    private String vin;
+    private String licensePlate;
     private Status status;
     private String policyNumber;
     private Double premium;

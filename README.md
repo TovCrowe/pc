@@ -1,6 +1,6 @@
-# Policy Management API
+# Auto Policy Management API
 
-A RESTful API built with Spring Boot for managing insurance clients and their policies. This project is a practical reference for learning the core patterns of a Spring Boot application: layered architecture, JPA, dependency injection, DTOs, and REST controllers.
+A RESTful API built with Spring Boot for managing insurance clients and their **auto (vehicle) policies**. This project is a practical reference for learning the core patterns of a Spring Boot application: layered architecture, JPA, dependency injection, DTOs, and REST controllers.
 
 ---
 
@@ -96,7 +96,11 @@ Each layer only knows about the one directly below it. This keeps concerns separ
 | Field | Type | Description |
 |---|---|---|
 | `id` | Long | Auto-generated primary key |
-| `type` | String | Type of insurance (e.g., "life", "auto") |
+| `vehicleMake` | String | Vehicle manufacturer (e.g., "Toyota") |
+| `vehicleModel` | String | Vehicle model (e.g., "Camry") |
+| `vehicleYear` | Integer | Year the vehicle was manufactured |
+| `vin` | String | Vehicle Identification Number |
+| `licensePlate` | String | License plate number |
 | `status` | Status | Current state: `ACTIVE`, `INACTIVE`, `PENDING`, or `CANCELLED` |
 | `policyNumber` | String | Unique policy identifier |
 | `premium` | Double | Monthly/annual cost |
@@ -126,7 +130,7 @@ The API never exposes JPA entities directly. Instead it uses DTOs — plain clas
 | DTO | Fields |
 |---|---|
 | `ClientRequestDTO` | `name`, `lastName`, `email`, `phone` |
-| `PolicyRequestDTO` | `type`, `status`, `policyNumber`, `premium`, `startDate`, `endDate`, `clientId` |
+| `PolicyRequestDTO` | `vehicleMake`, `vehicleModel`, `vehicleYear`, `vin`, `licensePlate`, `status`, `policyNumber`, `premium`, `startDate`, `endDate`, `clientId` |
 
 No `id` on request DTOs — the database generates it on insert, and the URL provides it on update.
 
@@ -137,7 +141,7 @@ Request DTOs also carry validation constraints (see [Validation](#validation) be
 | DTO | Fields |
 |---|---|
 | `ClientResponseDTO` | `id`, `name`, `lastName`, `email`, `phone` |
-| `PolicyResponseDTO` | `id`, `type`, `status`, `policyNumber`, `premium`, `startDate`, `endDate`, `clientId`, `clientName` |
+| `PolicyResponseDTO` | `id`, `vehicleMake`, `vehicleModel`, `vehicleYear`, `vin`, `licensePlate`, `status`, `policyNumber`, `premium`, `startDate`, `endDate`, `clientId`, `clientName` |
 
 `PolicyResponseDTO` flattens the client relationship into `clientId` and `clientName` instead of embedding the full `Client` object.
 
@@ -335,14 +339,18 @@ Content-Type: application/json
 }
 ```
 
-**Create a policy linked to client ID 1:**
+**Create an auto policy linked to client ID 1:**
 ```http
 POST /policies
 Authorization: Basic YWRtaW46YWRtaW4xMjM=
 Content-Type: application/json
 
 {
-  "type": "auto",
+  "vehicleMake": "Toyota",
+  "vehicleModel": "Camry",
+  "vehicleYear": 2022,
+  "vin": "1HGBH41JXMN109186",
+  "licensePlate": "ABC-1234",
   "status": "ACTIVE",
   "policyNumber": "POL-001",
   "premium": 150.00,
@@ -356,7 +364,11 @@ Content-Type: application/json
 ```json
 {
   "id": 1,
-  "type": "auto",
+  "vehicleMake": "Toyota",
+  "vehicleModel": "Camry",
+  "vehicleYear": 2022,
+  "vin": "1HGBH41JXMN109186",
+  "licensePlate": "ABC-1234",
   "status": "ACTIVE",
   "policyNumber": "POL-001",
   "premium": 150.00,
@@ -391,7 +403,11 @@ Request DTOs are annotated with Jakarta Validation constraints. The controller m
 
 | Field | Constraint | Rule |
 |---|---|---|
-| `type` | `@NotBlank` | Must not be null or empty |
+| `vehicleMake` | `@NotBlank` | Must not be null or empty |
+| `vehicleModel` | `@NotBlank` | Must not be null or empty |
+| `vehicleYear` | `@NotNull` | Must be provided |
+| `vin` | `@NotBlank` | Must not be null or empty |
+| `licensePlate` | `@NotBlank` | Must not be null or empty |
 | `policyNumber` | `@NotBlank` | Must not be null or empty |
 | `status` | `@NotNull` | Must be provided (`ACTIVE`, `INACTIVE`, `PENDING`, or `CANCELLED`) |
 | `premium` | `@NotNull` | Must be provided |

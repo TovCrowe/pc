@@ -16,7 +16,11 @@ public class Policy {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    private String type;
+    private String vehicleMake;
+    private String vehicleModel;
+    private Integer vehicleYear;
+    private String vin;
+    private String licensePlate;
 
     @Enumerated(EnumType.STRING)
     private Status status;

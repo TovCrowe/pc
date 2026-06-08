@@ -50,7 +50,11 @@ public class PolicyService {
                 .orElseThrow(() -> new ResourceNotFoundException("Client", dto.getClientId()));
 
         Policy policy = new Policy();
-        policy.setType(dto.getType());
+        policy.setVehicleMake(dto.getVehicleMake());
+        policy.setVehicleModel(dto.getVehicleModel());
+        policy.setVehicleYear(dto.getVehicleYear());
+        policy.setVin(dto.getVin());
+        policy.setLicensePlate(dto.getLicensePlate());
         policy.setStatus(dto.getStatus());
         policy.setPolicyNumber(dto.getPolicyNumber());
         policy.setPremium(dto.getPremium());
@@ -63,7 +67,11 @@ public class PolicyService {
     private PolicyResponseDTO toResponse(Policy policy) {
         return new PolicyResponseDTO(
                 policy.getId(),
-                policy.getType(),
+                policy.getVehicleMake(),
+                policy.getVehicleModel(),
+                policy.getVehicleYear(),
+                policy.getVin(),
+                policy.getLicensePlate(),
                 policy.getStatus(),
                 policy.getPolicyNumber(),
                 policy.getPremium(),

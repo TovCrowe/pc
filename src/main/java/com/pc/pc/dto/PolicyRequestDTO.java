@@ -14,7 +14,15 @@ import java.util.Date;
 @AllArgsConstructor
 public class PolicyRequestDTO {
     @NotBlank
-    private String type;
+    private String vehicleMake;
+    @NotBlank
+    private String vehicleModel;
+    @NotNull
+    private Integer vehicleYear;
+    @NotBlank
+    private String vin;
+    @NotBlank
+    private String licensePlate;
     @NotNull
     private Status status;
     @NotBlank
