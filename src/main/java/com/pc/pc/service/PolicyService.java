@@ -2,12 +2,17 @@ package com.pc.pc.service;
 
 import com.pc.pc.dto.PolicyRequestDTO;
 import com.pc.pc.dto.PolicyResponseDTO;
+import com.pc.pc.entity.AppUser;
 import com.pc.pc.entity.Client;
 import com.pc.pc.entity.Policy;
+import com.pc.pc.enums.Status;
 import com.pc.pc.exception.ResourceNotFoundException;
+import com.pc.pc.repository.AppUserRepository;
 import com.pc.pc.repository.ClientRepository;
 import com.pc.pc.repository.PolicyRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -18,15 +23,16 @@ public class PolicyService {
 
     private final PolicyRepository policyRepository;
     private final ClientRepository clientRepository;
+    private final AppUserRepository appUserRepository;
 
     public List<PolicyResponseDTO> findAll() {
-        return policyRepository.findAll().stream()
+        return policyRepository.findByClientOwner(getCurrentUser()).stream()
                 .map(this::toResponse)
                 .toList();
     }
 
     public PolicyResponseDTO findById(Long id) {
-        return policyRepository.findById(id)
+        return policyRepository.findByIdAndClientOwner(id, getCurrentUser())
                 .map(this::toResponse)
                 .orElseThrow(() -> new ResourceNotFoundException("Policy", id));
     }
@@ -36,17 +42,31 @@ public class PolicyService {
     }
 
     public PolicyResponseDTO update(Long id, PolicyRequestDTO dto) {
+        AppUser owner = getCurrentUser();
+        if (!policyRepository.existsByIdAndClientOwner(id, owner)) {
+            throw new ResourceNotFoundException("Policy", id);
+        }
         Policy policy = toEntity(dto);
         policy.setId(id);
         return toResponse(policyRepository.save(policy));
     }
 
     public void delete(Long id) {
+        if (!policyRepository.existsByIdAndClientOwner(id, getCurrentUser())) {
+            throw new ResourceNotFoundException("Policy", id);
+        }
         policyRepository.deleteById(id);
     }
 
+    private AppUser getCurrentUser() {
+        String username = SecurityContextHolder.getContext().getAuthentication().getName();
+        return appUserRepository.findByUsername(username)
+                .orElseThrow(() -> new UsernameNotFoundException("User not found: " + username));
+    }
+
     private Policy toEntity(PolicyRequestDTO dto) {
-        Client client = clientRepository.findById(dto.getClientId())
+        AppUser owner = getCurrentUser();
+        Client client = clientRepository.findByIdAndOwner(dto.getClientId(), owner)
                 .orElseThrow(() -> new ResourceNotFoundException("Client", dto.getClientId()));
 
         Policy policy = new Policy();

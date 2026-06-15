@@ -22,6 +22,10 @@ public class Client {
     private String email;
     private String phone;
 
+    @ManyToOne
+    @JoinColumn(name = "user_id", nullable = false)
+    private AppUser owner;
+
     @OneToMany(mappedBy = "client")
     private Set<Policy> policies;
 }

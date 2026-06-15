@@ -11,7 +11,7 @@ A RESTful API built with Spring Boot for managing insurance clients and their **
 | **Spring Boot 4.0.6** | The framework. Auto-configures everything and runs the app via an embedded Tomcat server — no WAR deployment needed. |
 | **Spring Web** | Provides `@RestController`, `@GetMapping`, etc. to build REST endpoints. |
 | **Spring Data JPA** | Abstracts database access. You define an interface and Spring generates the SQL queries for you. |
-| **Spring Security** | Adds authentication/authorization. Configured with HTTP Basic Auth and an in-memory user. |
+| **Spring Security** | Adds authentication/authorization. Configured with HTTP Basic Auth and a database-backed user store. |
 | **Spring Validation** | Lets you annotate entity fields with rules like `@NotNull`, `@Size`, `@Email`, etc. |
 | **Lombok** | Generates boilerplate Java (getters, setters, constructors) at compile time via annotations. |
 | **H2** | An in-memory database used in development. Data is lost when the app stops. |
@@ -27,7 +27,11 @@ src/main/java/com/pc/pc/
 ├── PcApplication.java          # Entry point — contains main(), starts Spring Boot
 │
 ├── config/
-│   └── SecurityConfig.java     # Spring Security configuration
+│   ├── SecurityConfig.java     # Spring Security configuration
+│   └── DataInitializer.java    # Seeds the default admin user into the DB on startup
+│
+├── security/
+│   └── AppUserDetailsService.java  # Loads users from the DB for Spring Security
 │
 ├── dto/                        # Data Transfer Objects — what the API sends and receives
 │   ├── ClientRequestDTO.java
@@ -36,6 +40,7 @@ src/main/java/com/pc/pc/
 │   └── PolicyResponseDTO.java
 │
 ├── entity/                     # JPA Entities — map directly to database tables
+│   ├── AppUser.java
 │   ├── Client.java
 │   └── Policy.java
 │
@@ -48,6 +53,7 @@ src/main/java/com/pc/pc/
 │   └── GlobalExceptionHandler.java     # @RestControllerAdvice — catches exceptions globally
 │
 ├── repository/                 # Data access layer — interfaces that talk to the DB
+│   ├── AppUserRepository.java
 │   ├── ClientRepository.java
 │   └── PolicyRepository.java
 │
@@ -89,6 +95,7 @@ Each layer only knows about the one directly below it. This keeps concerns separ
 | `lastName` | String | Last name |
 | `email` | String | Contact email |
 | `phone` | String | Phone number |
+| `owner` | AppUser | The authenticated user who created this client (FK: `user_id`) |
 | `policies` | Set\<Policy\> | Policies owned by this client (not exposed via API) |
 
 ### Policy — `policies` table
@@ -108,16 +115,17 @@ Each layer only knows about the one directly below it. This keeps concerns separ
 | `endDate` | Date | Coverage end date |
 | `client` | Client | The client this policy belongs to (FK: `client_id`) |
 
-### Relationship
-
-`Client` and `Policy` have a **one-to-many** relationship: one client can have many policies.
+### Relationships
 
 ```
-Client (1) ──────── (N) Policy
+AppUser (1) ──────── (N) Client (1) ──────── (N) Policy
 ```
 
-- In `Client.java`: `@OneToMany(mappedBy = "client")` — "I have many policies; the `client` field in Policy owns the foreign key column."
-- In `Policy.java`: `@ManyToOne` + `@JoinColumn(name = "client_id")` — "I belong to one client and I store the foreign key as `client_id`."
+- `AppUser → Client`: one user can have many clients. `Client` stores `user_id` as a foreign key.
+- `Client → Policy`: one client can have many policies. `Policy` stores `client_id` as a foreign key.
+- In `Client.java`: `@ManyToOne` + `@JoinColumn(name = "user_id")` — "I belong to one user."
+- In `Client.java`: `@OneToMany(mappedBy = "client")` — "I have many policies."
+- In `Policy.java`: `@ManyToOne` + `@JoinColumn(name = "client_id")` — "I belong to one client."
 
 ---
 
@@ -230,43 +238,181 @@ List<Policy> findByClient(Client client);
 // Spring generates: SELECT * FROM policies WHERE client_id = ?
 ```
 
-### Security (`SecurityConfig.java`)
+### Security
+
+Authentication is backed by the database. When a request arrives, Spring Security calls `AppUserDetailsService`, which loads the user from the `users` table. The password stored in the DB is BCrypt-hashed — plain text is never stored.
+
+**Why DB-backed instead of in-memory?**
+`InMemoryUserDetailsManager` hardcodes credentials in source code — there is no way to add, remove, or update users without redeploying. A DB-backed approach lets users be managed at runtime and is the prerequisite for linking each authenticated user to their own policies.
+
+**How the pieces connect:**
+
+```
+HTTP Request (username + password)
+    ↓
+Spring Security intercepts the request
+    ↓
+DaoAuthenticationProvider
+    ↓ calls
+AppUserDetailsService.loadUserByUsername(username)
+    ↓ queries
+AppUserRepository.findByUsername(username)   →  users table
+    ↓ returns UserDetails
+DaoAuthenticationProvider compares the BCrypt hash
+    ↓ grants or rejects access
+```
+
+**`AppUser` entity** (`entity/AppUser.java`) — the `users` table:
 
 ```java
-@Configuration
-@EnableWebSecurity
-public class SecurityConfig {
+@Entity
+@Table(name = "users")
+public class AppUser {
+    @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
 
-    @Bean
-    public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
-        http
-            .csrf(csrf -> csrf.disable())           // REST APIs don't need CSRF protection
-            .headers(h -> h.frameOptions(...))      // Allow H2 console (runs in an iframe)
-            .authorizeHttpRequests(auth -> auth
-                .requestMatchers("/h2-console/**").permitAll()
-                .anyRequest().authenticated()       // everything else requires login
-            )
-            .httpBasic(basic -> {});                // use HTTP Basic Auth
-        return http.build();
-    }
+    @Column(unique = true, nullable = false)
+    private String username;
 
-    @Bean
-    public UserDetailsService userDetailsService(PasswordEncoder encoder) {
-        // in-memory user — replace with DB-backed UserDetailsService later
-        var user = User.builder()
-            .username("admin")
-            .password(encoder.encode("admin123"))
-            .roles("ADMIN")
-            .build();
-        return new InMemoryUserDetailsManager(user);
-    }
+    @Column(nullable = false)
+    private String password;   // BCrypt hash — never plain text
 
-    @Bean
-    public PasswordEncoder passwordEncoder() {
-        return new BCryptPasswordEncoder();  // hashes passwords — never store plain text
+    @Column(nullable = false)
+    private String role;       // e.g. "ADMIN"
+}
+```
+
+**`AppUserRepository`** (`repository/AppUserRepository.java`) — one derived query method is all that's needed:
+
+```java
+public interface AppUserRepository extends JpaRepository<AppUser, Long> {
+    Optional<AppUser> findByUsername(String username);
+    // Spring generates: SELECT * FROM users WHERE username = ?
+}
+```
+
+**`AppUserDetailsService`** (`security/AppUserDetailsService.java`) — the bridge between Spring Security and the DB:
+
+```java
+@Service
+public class AppUserDetailsService implements UserDetailsService {
+
+    @Override
+    public UserDetails loadUserByUsername(String username) {
+        return appUserRepository.findByUsername(username)
+                .map(u -> new User(
+                        u.getUsername(),
+                        u.getPassword(),
+                        List.of(new SimpleGrantedAuthority("ROLE_" + u.getRole()))
+                ))
+                .orElseThrow(() -> new UsernameNotFoundException("User not found: " + username));
     }
 }
 ```
+
+**`SecurityConfig`** (`config/SecurityConfig.java`) — wires `DaoAuthenticationProvider` with the service and encoder:
+
+```java
+@Bean
+public DaoAuthenticationProvider authenticationProvider(
+        AppUserDetailsService userDetailsService,
+        PasswordEncoder passwordEncoder) {
+    DaoAuthenticationProvider provider = new DaoAuthenticationProvider(userDetailsService);
+    provider.setPasswordEncoder(passwordEncoder);
+    return provider;
+}
+
+@Bean
+public PasswordEncoder passwordEncoder() {
+    return new BCryptPasswordEncoder();  // hashes passwords — never store plain text
+}
+```
+
+**`DataInitializer`** (`config/DataInitializer.java`) — seeds the default admin user at startup so the app is never locked out on a fresh DB:
+
+```java
+@Bean
+CommandLineRunner seedUsers(AppUserRepository userRepository, PasswordEncoder passwordEncoder) {
+    return args -> {
+        if (userRepository.findByUsername("admin").isEmpty()) {
+            userRepository.save(new AppUser(null, "admin", passwordEncoder.encode("admin123"), "ADMIN"));
+        }
+    };
+}
+```
+
+The `if` check makes it idempotent — safe to run on every startup without creating duplicates.
+
+---
+
+## Authorization
+
+Authentication answers "who are you?" Authorization answers "what are you allowed to see?"
+
+Every client and policy is scoped to the authenticated user. A user can only read, create, update, or delete their own data — they can never access another user's records.
+
+**Why this matters:** without authorization, any authenticated user could hit `GET /clients/1` and retrieve a client that belongs to someone else. With it, the service filters every query by the logged-in user, so IDs from other users return `404 Not Found`.
+
+### How it works
+
+Both `ClientService` and `PolicyService` call a private `getCurrentUser()` method on every operation:
+
+```java
+private AppUser getCurrentUser() {
+    String username = SecurityContextHolder.getContext().getAuthentication().getName();
+    return appUserRepository.findByUsername(username)
+            .orElseThrow(() -> new UsernameNotFoundException("User not found: " + username));
+}
+```
+
+`SecurityContextHolder` is a thread-local store that Spring Security populates after authenticating each request. `.getAuthentication().getName()` returns the logged-in username, which is then looked up in the DB to get the full `AppUser`.
+
+### Scoped repository queries
+
+The repositories use Spring Data JPA derived query methods to filter by owner automatically:
+
+**`ClientRepository`:**
+```java
+List<Client> findByOwner(AppUser owner);
+// SELECT * FROM clients WHERE user_id = ?
+
+Optional<Client> findByIdAndOwner(Long id, AppUser owner);
+// SELECT * FROM clients WHERE id = ? AND user_id = ?
+
+boolean existsByIdAndOwner(Long id, AppUser owner);
+// SELECT COUNT(*) > 0 FROM clients WHERE id = ? AND user_id = ?
+```
+
+**`PolicyRepository`:**
+```java
+List<Policy> findByClientOwner(AppUser owner);
+// SELECT * FROM policies JOIN clients ON ... WHERE clients.user_id = ?
+
+Optional<Policy> findByIdAndClientOwner(Long id, AppUser owner);
+// SELECT * FROM policies JOIN clients ON ... WHERE policies.id = ? AND clients.user_id = ?
+
+boolean existsByIdAndClientOwner(Long id, AppUser owner);
+// SELECT COUNT(*) > 0 FROM policies JOIN clients ON ... WHERE policies.id = ? AND clients.user_id = ?
+```
+
+The `findByClientOwner` naming tells Spring Data JPA to follow the `client` relationship on `Policy` and then match the `owner` field on `Client` — it generates the JOIN automatically.
+
+### Behavior per operation
+
+| Operation | How authorization is applied |
+|---|---|
+| `GET /clients` | Returns only clients where `user_id` = current user |
+| `GET /clients/{id}` | Returns `404` if the client belongs to another user |
+| `POST /clients` | Sets `owner` = current user on the new client |
+| `PUT /clients/{id}` | Checks `existsByIdAndOwner` before saving — `404` if not owned |
+| `DELETE /clients/{id}` | Checks `existsByIdAndOwner` before deleting — `404` if not owned |
+| `GET /policies` | Returns only policies whose client belongs to current user |
+| `GET /policies/{id}` | Returns `404` if the policy's client belongs to another user |
+| `POST /policies` | Validates that the `clientId` in the request belongs to current user |
+| `PUT /policies/{id}` | Checks `existsByIdAndClientOwner` before saving — `404` if not owned |
+| `DELETE /policies/{id}` | Checks `existsByIdAndClientOwner` before deleting — `404` if not owned |
+
+> Returning `404` instead of `403` for unauthorized access is intentional — it avoids leaking that a resource exists at that ID.
 
 ---
 
@@ -556,12 +702,25 @@ Spring profiles let you have different configs per environment without changing 
 src/test/java/com/pc/pc/
 ├── PcApplicationTests.java          # Context load smoke test
 └── service/
+    ├── ClientServiceTest.java       # Unit tests for ClientService
     └── PolicyServiceTest.java       # Unit tests for PolicyService
 ```
 
-### `PolicyServiceTest`
+All service tests are pure unit tests using **Mockito** — no Spring context, no database. Repositories are mocked, so tests run fast and in isolation.
 
-Pure unit tests using **Mockito** — no Spring context, no database. `PolicyRepository` and `ClientRepository` are mocked, so tests run fast and in isolation.
+### `ClientServiceTest`
+
+| Test | What it verifies |
+|---|---|
+| `findAll_returnsMappedList` | Returns a mapped list of `ClientResponseDTO` with correct field values |
+| `findById_returnsResponse_whenFound` | Returns the correct response when the client exists |
+| `findById_throwsException_whenNotFound` | Throws `ResourceNotFoundException` for a missing ID |
+| `save_persistsAndReturnsResponse` | Calls `clientRepository.save()` and maps the result to a response DTO |
+| `update_setsIdAndSaves` | Sets the ID on the entity before saving (ensures UPDATE, not INSERT) |
+| `update_throwsException_whenNotFound` | Throws `ResourceNotFoundException` when the client ID doesn't exist |
+| `delete_callsDeleteById` | Delegates to `clientRepository.deleteById()` |
+
+### `PolicyServiceTest`
 
 | Test | What it verifies |
 |---|---|
@@ -571,6 +730,7 @@ Pure unit tests using **Mockito** — no Spring context, no database. `PolicyRep
 | `save_persistsAndReturnsResponse` | Calls `policyRepository.save()` and maps the result to a response DTO |
 | `save_throwsException_whenClientNotFound` | Throws `ResourceNotFoundException` when the `clientId` doesn't exist |
 | `update_setsIdAndSaves` | Sets the ID on the entity before saving (ensures UPDATE, not INSERT) |
+| `update_throwsException_whenNotFound` | Throws `ResourceNotFoundException` when the policy ID doesn't exist |
 | `delete_callsDeleteById` | Delegates to `policyRepository.deleteById()` |
 
 ### Test Dependencies
