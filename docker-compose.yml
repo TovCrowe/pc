@@ -1,0 +1,40 @@
+# Local production-like stack: the app + a real PostgreSQL database.
+# Use this to test the `prod` profile before deploying to a PaaS.
+#
+#   docker compose up --build
+#
+# Then hit http://localhost:8080 (login: admin / change-me-locally).
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: policydb
+      POSTGRES_USER: policy
+      POSTGRES_PASSWORD: secret
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U policy -d policydb"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      SPRING_DATASOURCE_URL: jdbc:postgresql://db:5432/policydb
+      DB_USER: policy
+      DB_PASS: secret
+      ADMIN_USERNAME: admin
+      ADMIN_PASSWORD: change-me-locally
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  pgdata:

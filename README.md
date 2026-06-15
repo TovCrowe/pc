@@ -20,9 +20,10 @@ A RESTful API built with Spring Boot for managing insurance clients and their **
 10. [Validation](#validation)
 11. [Exception Handling](#exception-handling)
 12. [Running the App](#running-the-app)
-13. [Running Tests](#running-tests)
-14. [Annotation Cheat Sheet](#annotation-cheat-sheet) — *quick reference*
-15. [Study Questions](#study-questions) — *test yourself*
+13. [Deployment](#deployment) — *Docker & PaaS*
+14. [Running Tests](#running-tests)
+15. [Annotation Cheat Sheet](#annotation-cheat-sheet) — *quick reference*
+16. [Study Questions](#study-questions) — *test yourself*
 
 ---
 
@@ -859,6 +860,63 @@ Spring profiles let you have different configs per environment without changing 
 | `application.properties` | (base) | — | Sets active profile |
 | `application-dev.properties` | `dev` | H2 in-memory | Recreated on each start (`create-drop`) |
 | `application-prod.properties` | `prod` | PostgreSQL | Migrated on start (`update`) |
+
+---
+
+## Deployment
+
+The app is containerized and deploys to any platform that runs a Docker image (Railway, Render, Fly.io, etc.).
+
+### Environment variables (production)
+
+The `prod` profile reads all secrets and connection details from the environment — nothing sensitive is committed:
+
+| Variable | Purpose | Example |
+|---|---|---|
+| `SPRING_PROFILES_ACTIVE` | Selects the prod profile | `prod` |
+| `SPRING_DATASOURCE_URL` | JDBC URL of the database | `jdbc:postgresql://db:5432/policydb` |
+| `DB_USER` | Database username | `policy` |
+| `DB_PASS` | Database password | `secret` |
+| `ADMIN_USERNAME` | Seeded admin login | `admin` |
+| `ADMIN_PASSWORD` | Seeded admin password | *(a real secret)* |
+| `PORT` | Port to bind to (injected by most PaaS) | `8080` |
+
+### Test the production build locally with Docker Compose
+
+This runs the app against a real PostgreSQL — the same setup as production — so you can catch prod-only issues before deploying:
+
+```bash
+docker compose up --build
+```
+
+- API: `http://localhost:8080` (login `admin` / `change-me-locally`)
+- Health check: `http://localhost:8080/actuator/health` → `{"status":"UP"}`
+- Tear down (and wipe the DB volume): `docker compose down -v`
+
+### Deploy to a PaaS (Railway / Render / Fly.io)
+
+The flow is the same on every platform:
+
+1. **Push this repo to GitHub** (the platform builds from the `Dockerfile`).
+2. **Provision a PostgreSQL database** on the platform — it gives you a connection URL, username, and password.
+3. **Create the web service** pointing at your repo. The platform detects the `Dockerfile` and builds the image.
+4. **Set the environment variables** from the table above (`SPRING_PROFILES_ACTIVE=prod`, the DB values, and a strong `ADMIN_PASSWORD`). Most platforms inject `PORT` automatically.
+5. **Set the health check path** to `/actuator/health` so the platform knows when the app is ready.
+6. **Deploy.** On first boot, `DataInitializer` seeds the admin user and Hibernate creates the tables.
+
+### Production hardening checklist
+
+What's done and what's left as you take this further:
+
+- [x] Secrets read from environment variables (no credentials in source)
+- [x] Admin password configurable per environment
+- [x] Health endpoint for platform probes (`/actuator/health`)
+- [x] Binds to the platform-injected `PORT`
+- [x] Runs as a non-root user in the container
+- [ ] Replace `ddl-auto=update` with **Flyway** migrations (versioned, reviewable schema changes)
+- [ ] Add a real user-registration flow instead of a single seeded admin
+- [ ] Restrict the H2 console / disable it entirely in prod
+- [ ] Add CORS config if a browser frontend will call the API
 
 ---
 
