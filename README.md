@@ -2,6 +2,28 @@
 
 A RESTful API built with Spring Boot for managing insurance clients and their **auto (vehicle) policies**. This project is a practical reference for learning the core patterns of a Spring Boot application: layered architecture, JPA, dependency injection, DTOs, and REST controllers.
 
+> **Studying Spring?** Start with [Spring & Spring Boot Fundamentals](#spring--spring-boot-fundamentals) for the mental model, then use the [Annotation Cheat Sheet](#annotation-cheat-sheet) as a quick reference and the [Study Questions](#study-questions) to test yourself.
+
+---
+
+## Table of Contents
+
+1. [Tech Stack](#tech-stack)
+2. [Spring & Spring Boot Fundamentals](#spring--spring-boot-fundamentals) — *the core concepts*
+3. [Project Structure](#project-structure)
+4. [The Request Lifecycle](#the-request-lifecycle)
+5. [Data Model](#data-model)
+6. [DTOs](#dtos-data-transfer-objects)
+7. [Spring Concepts in This Project](#spring-concepts-in-this-project)
+8. [Security](#spring-concepts-in-this-project) & [Authorization](#authorization)
+9. [API Endpoints](#api-endpoints)
+10. [Validation](#validation)
+11. [Exception Handling](#exception-handling)
+12. [Running the App](#running-the-app)
+13. [Running Tests](#running-tests)
+14. [Annotation Cheat Sheet](#annotation-cheat-sheet) — *quick reference*
+15. [Study Questions](#study-questions) — *test yourself*
+
 ---
 
 ## Tech Stack
@@ -16,6 +38,115 @@ A RESTful API built with Spring Boot for managing insurance clients and their **
 | **Lombok** | Generates boilerplate Java (getters, setters, constructors) at compile time via annotations. |
 | **H2** | An in-memory database used in development. Data is lost when the app stops. |
 | **PostgreSQL** | The production database. |
+
+---
+
+## Spring & Spring Boot Fundamentals
+
+This section is the mental model the rest of the README assumes. Read it once and the annotations everywhere else stop being magic.
+
+### Spring vs. Spring Boot
+
+- **Spring Framework** is the core: an *Inversion of Control (IoC) container* plus modules for web, data, security, etc. On its own, Spring needs a lot of manual configuration (XML or Java config) to wire everything together.
+- **Spring Boot** sits on top of Spring and removes that ceremony. It adds **auto-configuration**, **starter dependencies**, and an **embedded server** so you can run a production-grade app with almost no boilerplate.
+
+> Rule of thumb: *Spring gives you the building blocks; Spring Boot assembles them for you with sensible defaults.*
+
+### Inversion of Control & Dependency Injection (the #1 concept)
+
+Normally **your code** creates the objects it needs:
+
+```java
+ClientService service = new ClientService(new ClientRepository(...));  // you are in control
+```
+
+With Spring, you **invert** that control — you declare *what* you need, and the framework creates and supplies it:
+
+```java
+@Service
+@RequiredArgsConstructor
+public class ClientService {
+    private final ClientRepository clientRepository;  // "I need this" — Spring provides it
+}
+```
+
+This is **Inversion of Control (IoC)**, and the mechanism that delivers the objects is **Dependency Injection (DI)**. You never call `new` on a service, repository, or controller.
+
+**Why bother?** Loose coupling. `ClientService` doesn't know *how* its repository is built — Spring can swap in a mock for tests, a different implementation, or a proxy (for transactions/security) without changing your code.
+
+### The Container & Beans
+
+- A **bean** is any object that Spring creates and manages.
+- The **ApplicationContext** (the IoC *container*) is the registry that holds every bean and knows how to wire them together.
+- At startup Spring **scans** your packages for classes marked as beans, instantiates them, resolves their dependencies, and builds a complete object graph. This is the **bean lifecycle**: *instantiate → inject dependencies → ready to use → destroy on shutdown.*
+
+```
+Startup
+   ↓
+@ComponentScan finds @Component/@Service/@Repository/@Controller classes
+   ↓
+ApplicationContext instantiates each as a bean (singleton by default)
+   ↓
+Constructor injection wires dependencies between beans
+   ↓
+Application is ready to serve requests
+```
+
+By default beans are **singletons** — one shared instance for the whole app.
+
+### Stereotype Annotations (how a class becomes a bean)
+
+These all tell Spring "manage me as a bean." They're functionally similar but express *intent*, which aids readability and lets Spring apply layer-specific behavior:
+
+| Annotation | Layer | Purpose |
+|---|---|---|
+| `@Component` | generic | The base stereotype — any Spring-managed bean |
+| `@Service` | business logic | A `@Component` that marks a service-layer class |
+| `@Repository` | data access | A `@Component` that also translates DB exceptions into Spring's `DataAccessException` |
+| `@RestController` | web | `@Controller` + `@ResponseBody` — returns data (JSON), not view names |
+| `@Configuration` | config | A class that defines beans via `@Bean` methods |
+
+In this project: `ClientService`/`PolicyService` are `@Service`, the controllers are `@RestController`, `SecurityConfig`/`DataInitializer` are `@Configuration`. Repositories don't even need `@Repository` — Spring Data JPA registers them automatically.
+
+### Constructor Injection (what `@RequiredArgsConstructor` really does)
+
+Spring recommends **constructor injection**: dependencies are `final` fields set by a constructor. Lombok's `@RequiredArgsConstructor` generates that constructor for all `final` fields, so this:
+
+```java
+@Service
+@RequiredArgsConstructor
+public class ClientService {
+    private final ClientRepository clientRepository;
+    private final AppUserRepository appUserRepository;
+}
+```
+
+…is equivalent to writing the constructor by hand. When Spring builds `ClientService`, it sees the constructor needs those two beans and injects them. Constructor injection is preferred over field injection (`@Autowired` on a field) because it makes dependencies explicit, allows `final` (immutable) fields, and makes the class trivial to unit-test with plain `new`.
+
+### `@SpringBootApplication` & Auto-Configuration
+
+The entry point is tiny:
+
+```java
+@SpringBootApplication
+public class PcApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(PcApplication.class, args);
+    }
+}
+```
+
+`@SpringBootApplication` is actually **three annotations in one**:
+
+| It includes | What it does |
+|---|---|
+| `@Configuration` | Marks this class as a source of bean definitions |
+| `@ComponentScan` | Scans this package **and sub-packages** for beans (this is why your controllers/services are found automatically) |
+| `@EnableAutoConfiguration` | The Spring Boot magic — inspects the classpath and auto-configures beans |
+
+**Auto-configuration** means: because `spring-boot-starter-web` is on the classpath, Boot configures an embedded Tomcat, a `DispatcherServlet`, JSON conversion, etc. Because `spring-boot-starter-data-jpa` + H2 are present, it configures a `DataSource`, an `EntityManager`, and transaction management. You only override what you need (in `application.properties`).
+
+**Starters** are curated dependency bundles. `spring-boot-starter-web` pulls in Spring MVC, Jackson (JSON), validation, and Tomcat in one line — no version-juggling.
 
 ---
 
@@ -81,6 +212,45 @@ Entity       →   represents a single row in a database table
 ```
 
 Each layer only knows about the one directly below it. This keeps concerns separated and the code easier to test and maintain.
+
+---
+
+## The Request Lifecycle
+
+When a request like `GET /clients/1` arrives, it passes through Spring's machinery before reaching your code. Understanding this pipeline explains *where* each annotation plugs in.
+
+```
+1. HTTP request hits the embedded Tomcat server
+        ↓
+2. Spring Security Filter Chain
+   • authenticates the user (HTTP Basic → AppUserDetailsService)
+   • populates SecurityContextHolder with the logged-in user
+   • rejects with 401 if credentials are bad
+        ↓
+3. DispatcherServlet (Spring MVC's "front controller")
+   • the single entry point for every request
+        ↓
+4. Handler Mapping
+   • matches the URL + HTTP method to a controller method
+   • GET /clients/{id} → ClientController.findById(...)
+        ↓
+5. @Valid runs (for POST/PUT) — fails fast with 400 if invalid
+        ↓
+6. Controller method executes → calls the Service
+        ↓
+7. Service runs business logic → calls the Repository
+   • Spring Data JPA generates SQL, Hibernate executes it
+        ↓
+8. Entity → DTO mapping, value returned up the stack
+        ↓
+9. Jackson serializes the returned object to JSON
+        ↓
+10. HTTP response sent back to the client
+```
+
+If an exception is thrown anywhere in steps 6–8, the `@RestControllerAdvice` ([GlobalExceptionHandler](#exception-handling)) intercepts it and converts it to a clean JSON error response instead of a stack trace.
+
+**Key insight:** you only write steps 6–8. Everything else — routing, JSON conversion, authentication, validation triggering, transaction boundaries — is provided by Spring and configured by annotations.
 
 ---
 
@@ -176,7 +346,9 @@ private ClientResponseDTO toResponse(Client client) {
 
 ---
 
-## Spring Concepts Explained
+## Spring Concepts in This Project
+
+> This section shows the [fundamentals](#spring--spring-boot-fundamentals) applied to actual code in the project. If a concept here feels unfamiliar, jump back up to the fundamentals first.
 
 ### Dependency Injection
 
@@ -743,3 +915,132 @@ All test tooling comes bundled with `spring-boot-starter-test` — no extra depe
 | **Mockito** | Mocking repositories (`@Mock`, `@InjectMocks`, `when(...).thenReturn(...)`, `verify(...)`) |
 | **AssertJ** | Fluent assertions (`assertThat(...)`, `assertThatThrownBy(...)`) |
 | **spring-security-test** | Security context support for future controller-layer tests |
+
+---
+
+## Annotation Cheat Sheet
+
+Every annotation used in this project, grouped by purpose. Use this as a quick reference while reading the code.
+
+### Bootstrapping & Configuration
+| Annotation | Where | What it does |
+|---|---|---|
+| `@SpringBootApplication` | `PcApplication` | Entry point; bundles `@Configuration` + `@ComponentScan` + `@EnableAutoConfiguration` |
+| `@Configuration` | `SecurityConfig`, `DataInitializer` | Marks a class that defines beans |
+| `@Bean` | inside `@Configuration` | Declares a single bean from a method's return value |
+| `@EnableWebSecurity` | `SecurityConfig` | Turns on Spring Security's web support |
+
+### Stereotypes (make a class a bean)
+| Annotation | Where | What it does |
+|---|---|---|
+| `@RestController` | controllers | `@Controller` + `@ResponseBody` — methods return JSON |
+| `@Service` | services | Marks a business-logic bean |
+| `@Component` | (implicit base) | Generic Spring-managed bean |
+
+### Web / REST
+| Annotation | What it does |
+|---|---|
+| `@RequestMapping("/clients")` | Base URL path for a controller |
+| `@GetMapping` / `@PostMapping` / `@PutMapping` / `@DeleteMapping` | Map an HTTP method + path to a handler |
+| `@PathVariable` | Binds a URL segment (`/clients/{id}`) to a parameter |
+| `@RequestBody` | Deserializes the JSON request body into an object |
+| `@Valid` | Triggers Jakarta Validation on the request body |
+
+### Persistence (JPA / Hibernate)
+| Annotation | What it does |
+|---|---|
+| `@Entity` | Maps a class to a database table |
+| `@Table(name = "...")` | Sets the table name explicitly |
+| `@Id` | Marks the primary key field |
+| `@GeneratedValue(strategy = IDENTITY)` | Auto-increment PK, managed by the DB |
+| `@Column(unique, nullable)` | Configures a column's constraints |
+| `@OneToMany(mappedBy = "...")` | The "one" side of a relationship (no FK column) |
+| `@ManyToOne` | The "many" side (owns the FK column) |
+| `@JoinColumn(name = "...")` | Names the foreign-key column |
+| `@Enumerated(EnumType.STRING)` | Stores an enum as text instead of an ordinal int |
+
+### Validation
+| Annotation | Rule |
+|---|---|
+| `@NotBlank` | String must not be null or empty/whitespace |
+| `@NotNull` | Value must not be null (use for non-Strings) |
+| `@Email` | Must be a well-formed email address |
+
+### Exception Handling
+| Annotation | What it does |
+|---|---|
+| `@RestControllerAdvice` | Global exception handler returning JSON (`@ControllerAdvice` + `@ResponseBody`) |
+| `@ExceptionHandler(X.class)` | Maps a specific exception type to a handler method |
+
+### Lombok (compile-time code generation)
+| Annotation | Generates |
+|---|---|
+| `@Data` | Getters, setters, `equals`, `hashCode`, `toString` |
+| `@NoArgsConstructor` | Empty constructor (required by JPA) |
+| `@AllArgsConstructor` | Constructor with every field |
+| `@RequiredArgsConstructor` | Constructor for `final` fields → used for constructor injection |
+
+### Testing
+| Annotation | What it does |
+|---|---|
+| `@ExtendWith(MockitoExtension.class)` | Enables Mockito in a JUnit 5 test |
+| `@Mock` | Creates a mock of a dependency |
+| `@InjectMocks` | Builds the class under test with mocks injected |
+| `@BeforeEach` / `@AfterEach` | Setup/teardown run before/after each test |
+| `@Test` | Marks a test method |
+
+---
+
+## Study Questions
+
+Test your understanding. Try to answer from memory, then check against the code and the sections above.
+
+### Core Spring
+1. What is the difference between Spring and Spring Boot? Name two things Spring Boot adds.
+2. What does "Inversion of Control" actually invert? Who creates objects in a Spring app?
+3. What is a *bean*? What is the *ApplicationContext*?
+4. Why is constructor injection preferred over field injection? How does `@RequiredArgsConstructor` enable it?
+5. `@SpringBootApplication` is composed of three annotations — name them and what each does.
+6. What is auto-configuration, and how does adding `spring-boot-starter-data-jpa` trigger it?
+7. By default, how many instances of a `@Service` bean exist in the application?
+
+### Web Layer
+8. Trace a `POST /clients` request through the [request lifecycle](#the-request-lifecycle). Where does `@Valid` run, and what happens if it fails?
+9. What is the difference between `@RestController` and `@Controller`?
+10. What does `@RequestBody` do, and which library converts the JSON?
+
+### Data Layer
+11. `ClientRepository` is just an empty interface — why does it work without any implementation?
+12. How does Spring Data JPA turn `findByIdAndOwner` into SQL? What about `findByClientOwner`?
+13. On the `Client`–`Policy` relationship, which entity owns the foreign key, and which annotation marks it?
+14. Why does `@Enumerated(EnumType.STRING)` matter — what breaks if you remove it?
+
+### Cross-cutting
+15. How does `@RestControllerAdvice` catch an exception thrown inside a service method?
+16. How does the app know *who* is making a request, and where is that identity stored?
+17. Why does the API return `404` (not `403`) when you request another user's policy?
+18. Why do the service unit tests run without a database or a running Spring context?
+
+<details>
+<summary><strong>Answer key (click to expand)</strong></summary>
+
+1. Spring = the IoC container + modules (needs manual config). Spring Boot adds auto-configuration, starter dependencies, and an embedded server.
+2. It inverts *who creates and wires objects* — the framework does, not your code. See [IoC & DI](#inversion-of-control--dependency-injection-the-1-concept).
+3. A bean is any object Spring creates and manages; the ApplicationContext is the container/registry that holds them.
+4. It makes dependencies explicit, allows `final` immutable fields, and enables plain-`new` unit testing. `@RequiredArgsConstructor` generates a constructor for all `final` fields.
+5. `@Configuration` (bean definitions), `@ComponentScan` (find beans in sub-packages), `@EnableAutoConfiguration` (configure beans from the classpath).
+6. Boot inspects the classpath at startup; seeing JPA + a DB driver, it auto-creates a `DataSource`, `EntityManager`, and transaction manager.
+7. One — beans are singletons by default.
+8. Tomcat → Security filter → DispatcherServlet → handler mapping → `@Valid` (before the method body) → controller → service → repository. If `@Valid` fails, Spring throws `MethodArgumentNotValidException` and the handler returns `400` before the service runs.
+9. `@RestController` = `@Controller` + `@ResponseBody`; it returns data serialized to JSON instead of a view/template name.
+10. It deserializes the JSON request body into a Java object; Jackson does the conversion.
+11. Spring Data JPA generates a proxy implementation at runtime from the `JpaRepository` interface.
+12. It parses the method name into a query: `findByIdAndOwner` → `WHERE id = ? AND user_id = ?`. `findByClientOwner` follows the `client` relationship then matches `owner`, producing a JOIN.
+13. `Policy` owns the FK (`client_id`) via `@ManyToOne` + `@JoinColumn`; `Client` has the inverse `@OneToMany(mappedBy = "client")`.
+14. Without it, JPA stores the enum's ordinal int (0,1,2…). Reordering or inserting enum values would silently corrupt existing rows; `STRING` stores the name and is stable.
+15. `@RestControllerAdvice` registers a global advice bean; Spring routes any exception bubbling out of a controller to the matching `@ExceptionHandler`.
+16. The Security filter authenticates the request and stores the user in `SecurityContextHolder` (thread-local); services read it via `getCurrentUser()`.
+17. Returning `404` avoids leaking that a resource exists at that ID for another user. See [Authorization](#authorization).
+18. They use Mockito to mock repositories and `SecurityContextHolder`, so no Spring context or DB is started — fast, isolated unit tests.
+
+</details>
