@@ -549,3 +549,37 @@ Spring profiles let you have different configs per environment without changing 
 ```bash
 ./mvnw test
 ```
+
+### Test Structure
+
+```
+src/test/java/com/pc/pc/
+├── PcApplicationTests.java          # Context load smoke test
+└── service/
+    └── PolicyServiceTest.java       # Unit tests for PolicyService
+```
+
+### `PolicyServiceTest`
+
+Pure unit tests using **Mockito** — no Spring context, no database. `PolicyRepository` and `ClientRepository` are mocked, so tests run fast and in isolation.
+
+| Test | What it verifies |
+|---|---|
+| `findAll_returnsMappedList` | Returns a mapped list of `PolicyResponseDTO` with correct field values |
+| `findById_returnsResponse_whenFound` | Returns the correct response when the policy exists |
+| `findById_throwsException_whenNotFound` | Throws `ResourceNotFoundException` for a missing ID |
+| `save_persistsAndReturnsResponse` | Calls `policyRepository.save()` and maps the result to a response DTO |
+| `save_throwsException_whenClientNotFound` | Throws `ResourceNotFoundException` when the `clientId` doesn't exist |
+| `update_setsIdAndSaves` | Sets the ID on the entity before saving (ensures UPDATE, not INSERT) |
+| `delete_callsDeleteById` | Delegates to `policyRepository.deleteById()` |
+
+### Test Dependencies
+
+All test tooling comes bundled with `spring-boot-starter-test` — no extra dependencies needed:
+
+| Tool | Role |
+|---|---|
+| **JUnit 5** | Test runner (`@Test`, `@BeforeEach`, `@ExtendWith`) |
+| **Mockito** | Mocking repositories (`@Mock`, `@InjectMocks`, `when(...).thenReturn(...)`, `verify(...)`) |
+| **AssertJ** | Fluent assertions (`assertThat(...)`, `assertThatThrownBy(...)`) |
+| **spring-security-test** | Security context support for future controller-layer tests |
