@@ -2,7 +2,7 @@
 
 A RESTful API built with Spring Boot for managing insurance clients and their **auto (vehicle) policies**. This project is a practical reference for learning the core patterns of a Spring Boot application: layered architecture, JPA, dependency injection, DTOs, and REST controllers.
 
-> **Studying Spring?** Start with [Spring & Spring Boot Fundamentals](#spring--spring-boot-fundamentals) for the mental model, then use the [Annotation Cheat Sheet](#annotation-cheat-sheet) as a quick reference and the [Study Questions](#study-questions) to test yourself.
+> **Studying Spring?** Start with [Spring & Spring Boot Fundamentals](#spring--spring-boot-fundamentals) for the mental model, then use the [Annotation Cheat Sheet](#annotation-cheat-sheet) as a quick reference.
 
 ---
 
@@ -19,11 +19,12 @@ A RESTful API built with Spring Boot for managing insurance clients and their **
 9. [API Endpoints](#api-endpoints)
 10. [Validation](#validation)
 11. [Exception Handling](#exception-handling)
-12. [Running the App](#running-the-app)
-13. [Deployment](#deployment) — *Docker & PaaS*
-14. [Running Tests](#running-tests)
-15. [Annotation Cheat Sheet](#annotation-cheat-sheet) — *quick reference*
-16. [Study Questions](#study-questions) — *test yourself*
+12. [API Documentation (Swagger / OpenAPI)](#api-documentation-swagger--openapi)
+13. [Running the App](#running-the-app)
+14. [Running with Docker](#running-with-docker)
+15. [Deployment](#deployment) — *Docker & PaaS*
+16. [Running Tests](#running-tests)
+17. [Annotation Cheat Sheet](#annotation-cheat-sheet) — *quick reference*
 
 ---
 
@@ -822,6 +823,21 @@ The `MethodArgumentNotValidException` handler returns a `400` with all failing f
 
 ---
 
+## API Documentation (Swagger / OpenAPI)
+
+Interactive API docs are generated automatically from the controllers and DTOs by [springdoc-openapi](https://springdoc.org/). No manual spec maintenance — the contract always matches the code.
+
+| URL | What it serves |
+|---|---|
+| `http://localhost:8080/swagger-ui.html` | **Swagger UI** — an interactive page to browse and call every endpoint. |
+| `http://localhost:8080/v3/api-docs` | The raw **OpenAPI 3.1** spec as JSON (import into Postman, codegen tools, etc.). |
+
+These paths are whitelisted in `SecurityConfig`, so the docs load without authentication. The endpoints themselves still require HTTP Basic auth — Swagger UI shows an **Authorize** button (the `basicAuth` scheme is declared in `OpenApiConfig`) so you can enter credentials and call secured endpoints directly from the browser.
+
+The API title, description, version, and security scheme are configured in [`OpenApiConfig`](src/main/java/com/pc/pc/config/OpenApiConfig.java).
+
+---
+
 ## Running the App
 
 **Prerequisites:** Java 21, Maven (or use the included `./mvnw` wrapper — no Maven installation needed)
@@ -863,6 +879,81 @@ Spring profiles let you have different configs per environment without changing 
 
 ---
 
+## Running with Docker
+
+`./mvnw spring-boot:run` is the quickest way to run the app, but it uses the in-memory H2 database. Running with Docker instead spins up the app **and a real PostgreSQL** together — the same setup as production — so you can catch prod-only issues before deploying.
+
+### What's in the box
+
+| File | Role |
+|---|---|
+| `Dockerfile` | Multi-stage build: stage 1 compiles the JAR with Maven, stage 2 runs it on a slim JRE as a non-root user |
+| `docker-compose.yml` | Defines two containers — `app` (the API, `prod` profile) and `db` (PostgreSQL) — and wires them together |
+| `.dockerignore` | Keeps the build context small (excludes `target/`, `.git/`, IDE files, etc.) |
+
+### Prerequisites
+
+You need **Docker Engine** and the **Docker Compose v2 plugin**.
+
+On Ubuntu / Pop!_OS:
+
+```bash
+sudo apt install -y docker.io docker-compose-v2
+
+# Run docker without sudo (then log out and back in to apply)
+sudo usermod -aG docker $USER
+
+# Verify
+docker --version
+docker compose version
+```
+
+> If `docker compose version` says "unknown command", the `docker-compose-v2` plugin isn't installed — `docker.io` alone does **not** include it.
+
+### Build and run
+
+From the project root:
+
+```bash
+docker compose up --build
+```
+
+- The **first** run takes a few minutes — it builds the image (downloading Maven dependencies inside the container). Later runs are cached and fast.
+- The app is ready when you see `Started PcApplication in X seconds` in the logs.
+- This terminal now streams the live logs from both containers. Leave it running.
+
+### Test it
+
+In a **second terminal**, or with a tool like Postman. The login is `admin` / `change-me-locally` (set in `docker-compose.yml` via `ADMIN_PASSWORD`):
+
+```bash
+# Health check (no auth required)
+curl http://localhost:8080/actuator/health
+# → {"status":"UP"}
+
+# Create a client (HTTP Basic Auth)
+curl -u admin:change-me-locally -X POST http://localhost:8080/clients \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Victor","lastName":"Tovar","email":"victor@example.com","phone":"555-1234"}'
+# → JSON with "id": 1
+
+# List your clients
+curl -u admin:change-me-locally http://localhost:8080/clients
+```
+
+**Using Postman?** Set the **Authorization** tab to **Basic Auth** (`admin` / `change-me-locally`) on each request. For the POST, use **Body → raw → JSON**.
+
+### Stop it
+
+In the logs terminal press `Ctrl+C`, then:
+
+```bash
+docker compose down       # stop and remove the containers
+docker compose down -v     # also delete the PostgreSQL data volume (fresh DB next time)
+```
+
+---
+
 ## Deployment
 
 The app is containerized and deploys to any platform that runs a Docker image (Railway, Render, Fly.io, etc.).
@@ -881,17 +972,9 @@ The `prod` profile reads all secrets and connection details from the environment
 | `ADMIN_PASSWORD` | Seeded admin password | *(a real secret)* |
 | `PORT` | Port to bind to (injected by most PaaS) | `8080` |
 
-### Test the production build locally with Docker Compose
+### Test the production build locally first
 
-This runs the app against a real PostgreSQL — the same setup as production — so you can catch prod-only issues before deploying:
-
-```bash
-docker compose up --build
-```
-
-- API: `http://localhost:8080` (login `admin` / `change-me-locally`)
-- Health check: `http://localhost:8080/actuator/health` → `{"status":"UP"}`
-- Tear down (and wipe the DB volume): `docker compose down -v`
+Before deploying, run the containerized app against a real PostgreSQL with `docker compose up --build` — see [Running with Docker](#running-with-docker) for the full walkthrough. It uses the same image and `prod` profile the PaaS will run, so if it works locally it'll work in the cloud.
 
 ### Deploy to a PaaS (Railway / Render / Fly.io)
 
@@ -1046,59 +1129,3 @@ Every annotation used in this project, grouped by purpose. Use this as a quick r
 | `@InjectMocks` | Builds the class under test with mocks injected |
 | `@BeforeEach` / `@AfterEach` | Setup/teardown run before/after each test |
 | `@Test` | Marks a test method |
-
----
-
-## Study Questions
-
-Test your understanding. Try to answer from memory, then check against the code and the sections above.
-
-### Core Spring
-1. What is the difference between Spring and Spring Boot? Name two things Spring Boot adds.
-2. What does "Inversion of Control" actually invert? Who creates objects in a Spring app?
-3. What is a *bean*? What is the *ApplicationContext*?
-4. Why is constructor injection preferred over field injection? How does `@RequiredArgsConstructor` enable it?
-5. `@SpringBootApplication` is composed of three annotations — name them and what each does.
-6. What is auto-configuration, and how does adding `spring-boot-starter-data-jpa` trigger it?
-7. By default, how many instances of a `@Service` bean exist in the application?
-
-### Web Layer
-8. Trace a `POST /clients` request through the [request lifecycle](#the-request-lifecycle). Where does `@Valid` run, and what happens if it fails?
-9. What is the difference between `@RestController` and `@Controller`?
-10. What does `@RequestBody` do, and which library converts the JSON?
-
-### Data Layer
-11. `ClientRepository` is just an empty interface — why does it work without any implementation?
-12. How does Spring Data JPA turn `findByIdAndOwner` into SQL? What about `findByClientOwner`?
-13. On the `Client`–`Policy` relationship, which entity owns the foreign key, and which annotation marks it?
-14. Why does `@Enumerated(EnumType.STRING)` matter — what breaks if you remove it?
-
-### Cross-cutting
-15. How does `@RestControllerAdvice` catch an exception thrown inside a service method?
-16. How does the app know *who* is making a request, and where is that identity stored?
-17. Why does the API return `404` (not `403`) when you request another user's policy?
-18. Why do the service unit tests run without a database or a running Spring context?
-
-<details>
-<summary><strong>Answer key (click to expand)</strong></summary>
-
-1. Spring = the IoC container + modules (needs manual config). Spring Boot adds auto-configuration, starter dependencies, and an embedded server.
-2. It inverts *who creates and wires objects* — the framework does, not your code. See [IoC & DI](#inversion-of-control--dependency-injection-the-1-concept).
-3. A bean is any object Spring creates and manages; the ApplicationContext is the container/registry that holds them.
-4. It makes dependencies explicit, allows `final` immutable fields, and enables plain-`new` unit testing. `@RequiredArgsConstructor` generates a constructor for all `final` fields.
-5. `@Configuration` (bean definitions), `@ComponentScan` (find beans in sub-packages), `@EnableAutoConfiguration` (configure beans from the classpath).
-6. Boot inspects the classpath at startup; seeing JPA + a DB driver, it auto-creates a `DataSource`, `EntityManager`, and transaction manager.
-7. One — beans are singletons by default.
-8. Tomcat → Security filter → DispatcherServlet → handler mapping → `@Valid` (before the method body) → controller → service → repository. If `@Valid` fails, Spring throws `MethodArgumentNotValidException` and the handler returns `400` before the service runs.
-9. `@RestController` = `@Controller` + `@ResponseBody`; it returns data serialized to JSON instead of a view/template name.
-10. It deserializes the JSON request body into a Java object; Jackson does the conversion.
-11. Spring Data JPA generates a proxy implementation at runtime from the `JpaRepository` interface.
-12. It parses the method name into a query: `findByIdAndOwner` → `WHERE id = ? AND user_id = ?`. `findByClientOwner` follows the `client` relationship then matches `owner`, producing a JOIN.
-13. `Policy` owns the FK (`client_id`) via `@ManyToOne` + `@JoinColumn`; `Client` has the inverse `@OneToMany(mappedBy = "client")`.
-14. Without it, JPA stores the enum's ordinal int (0,1,2…). Reordering or inserting enum values would silently corrupt existing rows; `STRING` stores the name and is stable.
-15. `@RestControllerAdvice` registers a global advice bean; Spring routes any exception bubbling out of a controller to the matching `@ExceptionHandler`.
-16. The Security filter authenticates the request and stores the user in `SecurityContextHolder` (thread-local); services read it via `getCurrentUser()`.
-17. Returning `404` avoids leaking that a resource exists at that ID for another user. See [Authorization](#authorization).
-18. They use Mockito to mock repositories and `SecurityContextHolder`, so no Spring context or DB is started — fast, isolated unit tests.
-
-</details>
