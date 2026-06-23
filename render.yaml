@@ -1,0 +1,68 @@
+# Render Blueprint — provisions the database, backend API, and frontend together.
+# Spec: https://render.com/docs/blueprint-spec
+#
+# Two URLs are cross-referenced between services and can't be auto-wired, so they
+# are marked `sync: false` (you set them in the dashboard after the first deploy):
+#   1. Deploy the blueprint.
+#   2. On pc-frontend, set VITE_API_BASE_URL = the backend URL  (https://pc-api.onrender.com)
+#   3. On pc-api,      set APP_CORS_ALLOWED_ORIGINS = the frontend URL (https://pc-frontend.onrender.com)
+#   4. Redeploy both so the values take effect (VITE_* is baked in at build time).
+
+databases:
+  - name: pc-db
+    databaseName: policydb
+    user: policy
+    plan: free
+
+services:
+  # ---- Backend: Spring Boot API (Docker) ----
+  - type: web
+    name: pc-api
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /actuator/health
+    envVars:
+      - key: SPRING_PROFILES_ACTIVE
+        value: prod
+      - key: DB_HOST
+        fromDatabase:
+          name: pc-db
+          property: host
+      - key: DB_PORT
+        fromDatabase:
+          name: pc-db
+          property: port
+      - key: DB_NAME
+        fromDatabase:
+          name: pc-db
+          property: database
+      - key: DB_USER
+        fromDatabase:
+          name: pc-db
+          property: user
+      - key: DB_PASS
+        fromDatabase:
+          name: pc-db
+          property: password
+      - key: ADMIN_USERNAME
+        value: admin
+      - key: ADMIN_PASSWORD
+        generateValue: true # Render generates a strong secret; read it in the dashboard
+      - key: APP_CORS_ALLOWED_ORIGINS
+        sync: false # set to the pc-frontend URL after first deploy
+
+  # ---- Frontend: React SPA (static site) ----
+  - type: web
+    name: pc-frontend
+    runtime: static
+    buildCommand: cd frontend && npm install && npm run build
+    staticPublishPath: ./frontend/dist
+    envVars:
+      - key: VITE_API_BASE_URL
+        sync: false # set to the pc-api URL after first deploy, then redeploy
+    routes:
+      # SPA fallback: let React Router handle client-side routes.
+      - type: rewrite
+        source: /*
+        destination: /index.html

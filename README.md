@@ -992,6 +992,19 @@ The flow is the same on every platform:
 5. **Set the health check path** to `/actuator/health` so the platform knows when the app is ready.
 6. **Deploy.** On first boot, `DataInitializer` seeds the admin user and Hibernate creates the tables.
 
+### One-click on Render (Blueprint)
+
+A [`render.yaml`](render.yaml) blueprint provisions all three pieces at once — the PostgreSQL database, the backend API (Docker), and the frontend (static site). In Render: **New → Blueprint**, point it at this repo, and apply.
+
+Two URLs are cross-referenced between the services and can't be auto-wired, so after the first deploy set them in the dashboard and redeploy:
+
+1. On **pc-frontend**, set `VITE_API_BASE_URL` to the backend URL (e.g. `https://pc-api.onrender.com`). Vite bakes this in at **build time**, so a redeploy is required after changing it.
+2. On **pc-api**, set `APP_CORS_ALLOWED_ORIGINS` to the frontend URL (e.g. `https://pc-frontend.onrender.com`).
+
+The frontend static site uses a rewrite rule (`/*` → `/index.html`) so React Router's client-side routes resolve on refresh. The database connection is assembled from the `DB_HOST`/`DB_PORT`/`DB_NAME`/`DB_USER`/`DB_PASS` values Render injects from the managed database.
+
+> **Free-tier caveats:** the API sleeps after inactivity (~30–50s cold start on the next request), and free PostgreSQL databases expire after ~90 days.
+
 ### Production hardening checklist
 
 What's done and what's left as you take this further:
@@ -1004,7 +1017,7 @@ What's done and what's left as you take this further:
 - [ ] Replace `ddl-auto=update` with **Flyway** migrations (versioned, reviewable schema changes)
 - [ ] Add a real user-registration flow instead of a single seeded admin
 - [ ] Restrict the H2 console / disable it entirely in prod
-- [ ] Add CORS config if a browser frontend will call the API
+- [x] CORS configured for a browser frontend (`app.cors.allowed-origins`)
 
 ---
 
