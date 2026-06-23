@@ -24,7 +24,8 @@ A RESTful API built with Spring Boot for managing insurance clients and their **
 14. [Running with Docker](#running-with-docker)
 15. [Deployment](#deployment) — *Docker & PaaS*
 16. [Running Tests](#running-tests)
-17. [Annotation Cheat Sheet](#annotation-cheat-sheet) — *quick reference*
+17. [Frontend](#frontend) — *React SPA*
+18. [Annotation Cheat Sheet](#annotation-cheat-sheet) — *quick reference*
 
 ---
 
@@ -877,6 +878,10 @@ Spring profiles let you have different configs per environment without changing 
 | `application-dev.properties` | `dev` | H2 in-memory | Recreated on each start (`create-drop`) |
 | `application-prod.properties` | `prod` | PostgreSQL | Migrated on start (`update`) |
 
+### CORS
+
+Browser origins allowed to call the API are configured in `application.properties` via `app.cors.allowed-origins` (comma-separated). It defaults to the local dev servers (`http://localhost:5173`, `http://localhost:3000`) and is overridable per environment with the `APP_CORS_ALLOWED_ORIGINS` env var. The setting is wired into `SecurityConfig`'s `CorsConfigurationSource`, with credentials allowed so the browser can send the HTTP Basic header cross-origin.
+
 ---
 
 ## Running with Docker
@@ -1056,6 +1061,48 @@ All test tooling comes bundled with `spring-boot-starter-test` — no extra depe
 | **Mockito** | Mocking repositories (`@Mock`, `@InjectMocks`, `when(...).thenReturn(...)`, `verify(...)`) |
 | **AssertJ** | Fluent assertions (`assertThat(...)`, `assertThatThrownBy(...)`) |
 | **spring-security-test** | Security context support for future controller-layer tests |
+
+---
+
+## Frontend
+
+A single-page app in **React + TypeScript + Vite** lives in [`frontend/`](frontend/) and consumes this API. It's a separate npm project in the same repository (monorepo), so the backend and frontend are versioned together but built independently.
+
+### Stack
+
+| Tool | Role |
+|---|---|
+| **Vite + React 18 + TypeScript** | Build tooling and UI framework |
+| **React Router** | Client-side routing (login, list and form pages) |
+| **TanStack Query** | Server-state fetching, caching, and cache invalidation |
+| **Axios** | HTTP client with an interceptor that attaches the HTTP Basic header |
+
+### Features
+
+- **Login** screen that validates credentials against the API before storing them.
+- **HTTP Basic auth** persisted in `localStorage`; a response interceptor clears the session and redirects to `/login` on a `401`.
+- **CRUD for clients and policies** — list, create, edit, and delete, mapped to the REST endpoints.
+- TypeScript types that mirror the backend DTOs (`ClientResponseDTO`, `PolicyResponseDTO`, …).
+
+### Running it
+
+```bash
+# 1) Start the backend (dev profile)
+./mvnw spring-boot:run
+
+# 2) Start the frontend dev server
+cd frontend
+npm install
+npm run dev
+```
+
+Open `http://localhost:5173` and log in with the seeded credentials (`admin` / `admin123` in dev).
+
+> **CORS:** the dev origin `http://localhost:5173` is already whitelisted in `SecurityConfig`
+> (see [Configuration Profiles](#configuration-profiles) — `app.cors.allowed-origins`). Add the
+> production frontend origin there before deploying.
+
+The API base URL is read from `VITE_API_BASE_URL` (`frontend/.env.development`, defaults to `http://localhost:8080`). See [`frontend/README.md`](frontend/README.md) for full details.
 
 ---
 
