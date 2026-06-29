@@ -21,11 +21,12 @@ A RESTful API built with Spring Boot for managing insurance clients and their **
 11. [Exception Handling](#exception-handling)
 12. [API Documentation (Swagger / OpenAPI)](#api-documentation-swagger--openapi)
 13. [Running the App](#running-the-app)
-14. [Running with Docker](#running-with-docker)
-15. [Deployment](#deployment) — *Docker & PaaS*
-16. [Running Tests](#running-tests)
-17. [Frontend](#frontend) — *React SPA*
-18. [Annotation Cheat Sheet](#annotation-cheat-sheet) — *quick reference*
+14. [Database Migrations (Flyway)](#database-migrations-flyway)
+15. [Running with Docker](#running-with-docker)
+16. [Deployment](#deployment) — *Docker & PaaS*
+17. [Running Tests](#running-tests)
+18. [Frontend](#frontend) — *React SPA*
+19. [Annotation Cheat Sheet](#annotation-cheat-sheet) — *quick reference*
 
 ---
 
@@ -38,6 +39,7 @@ A RESTful API built with Spring Boot for managing insurance clients and their **
 | **Spring Data JPA** | Abstracts database access. You define an interface and Spring generates the SQL queries for you. |
 | **Spring Security** | Adds authentication/authorization. Configured with HTTP Basic Auth and a database-backed user store. |
 | **Spring Validation** | Lets you annotate entity fields with rules like `@NotNull`, `@Size`, `@Email`, etc. |
+| **Flyway** | Versioned database migrations. Owns the schema via `V*.sql` files instead of letting Hibernate auto-generate it. |
 | **Lombok** | Generates boilerplate Java (getters, setters, constructors) at compile time via annotations. |
 | **H2** | An in-memory database used in development. Data is lost when the app stops. |
 | **PostgreSQL** | The production database. |
@@ -875,12 +877,48 @@ Spring profiles let you have different configs per environment without changing 
 | File | Profile | Database | Schema behavior |
 |---|---|---|---|
 | `application.properties` | (base) | — | Sets active profile |
-| `application-dev.properties` | `dev` | H2 in-memory | Recreated on each start (`create-drop`) |
-| `application-prod.properties` | `prod` | PostgreSQL | Migrated on start (`update`) |
+| `application-dev.properties` | `dev` | H2 in-memory | Built by Flyway, validated by Hibernate (`validate`) |
+| `application-prod.properties` | `prod` | PostgreSQL | Built by Flyway, validated by Hibernate (`validate`) |
 
 ### CORS
 
 Browser origins allowed to call the API are configured in `application.properties` via `app.cors.allowed-origins` (comma-separated). It defaults to the local dev servers (`http://localhost:5173`, `http://localhost:3000`) and is overridable per environment with the `APP_CORS_ALLOWED_ORIGINS` env var. The setting is wired into `SecurityConfig`'s `CorsConfigurationSource`, with credentials allowed so the browser can send the HTTP Basic header cross-origin.
+
+---
+
+## Database Migrations (Flyway)
+
+The database schema is owned by **Flyway**, not by Hibernate. Instead of letting `ddl-auto` auto-generate tables (convenient but uncontrolled and risky in production), the schema is defined as versioned SQL migration files that are reviewable in git and applied identically across every environment.
+
+### How it works
+
+- Migrations live in [`src/main/resources/db/migration/`](src/main/resources/db/migration/) and follow the `V<version>__<description>.sql` naming convention (e.g. [`V1__init.sql`](src/main/resources/db/migration/V1__init.sql)).
+- On startup, Flyway checks its `flyway_schema_history` table, runs any **not-yet-applied** migrations **in order**, and records each one so it never runs twice.
+- Hibernate is set to `ddl-auto=validate`: it no longer touches the schema — it only **verifies** that the JPA entities match the tables Flyway created, and fails fast on a mismatch.
+
+### The golden rules
+
+1. **Never edit an applied migration.** `V1__init.sql` is frozen. Every change goes in a new file (`V2__…`, `V3__…`).
+2. **Every entity change needs a migration.** Because of `validate`, if you add/alter a field on an `@Entity` without a matching migration, the app won't start — by design. This keeps Java and the database deliberately in sync.
+
+### Example: adding a new migration
+
+To add audit columns to `policies`, create `src/main/resources/db/migration/V2__add_audit_columns.sql`:
+
+```sql
+ALTER TABLE policies ADD COLUMN created_at TIMESTAMP;
+ALTER TABLE policies ADD COLUMN updated_at TIMESTAMP;
+```
+
+On the next start, Flyway applies `V2` to any database still at `V1` (and runs `V1` then `V2` on a brand-new database).
+
+### The existing production database
+
+`application-prod.properties` sets `spring.flyway.baseline-on-migrate=true`. The PostgreSQL database on Render already had tables (created by the previous `ddl-auto=update`), so Flyway **baselines** it — it adopts the existing schema as version 1 instead of trying to re-create the tables. New migrations (`V2`+) then apply normally.
+
+### Dependencies (Spring Boot 4 note)
+
+Spring Boot 4 modularised its autoconfiguration, so Flyway needs **three** dependencies: `flyway-core`, `flyway-database-postgresql`, and — crucially — `org.springframework.boot:spring-boot-flyway`, which provides the Flyway autoconfiguration that used to live in `spring-boot-autoconfigure`. Without the last one, Flyway is on the classpath but never runs.
 
 ---
 
@@ -1014,7 +1052,7 @@ What's done and what's left as you take this further:
 - [x] Health endpoint for platform probes (`/actuator/health`)
 - [x] Binds to the platform-injected `PORT`
 - [x] Runs as a non-root user in the container
-- [ ] Replace `ddl-auto=update` with **Flyway** migrations (versioned, reviewable schema changes)
+- [x] Flyway migrations (versioned, reviewable schema changes) replacing `ddl-auto`
 - [ ] Add a real user-registration flow instead of a single seeded admin
 - [ ] Restrict the H2 console / disable it entirely in prod
 - [x] CORS configured for a browser frontend (`app.cors.allowed-origins`)
