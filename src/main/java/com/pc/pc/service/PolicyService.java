@@ -98,7 +98,9 @@ public class PolicyService {
                 policy.getStartDate(),
                 policy.getEndDate(),
                 policy.getClient().getId(),
-                policy.getClient().getName()
+                policy.getClient().getName(),
+                policy.getCreatedAt(),
+                policy.getUpdatedAt()
         );
     }
 }

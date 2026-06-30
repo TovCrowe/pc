@@ -272,6 +272,8 @@ If an exception is thrown anywhere in steps 6–8, the `@RestControllerAdvice` (
 | `phone` | String | Phone number |
 | `owner` | AppUser | The authenticated user who created this client (FK: `user_id`) |
 | `policies` | Set\<Policy\> | Policies owned by this client (not exposed via API) |
+| `createdAt` | Instant | When the row was created — set automatically by JPA auditing |
+| `updatedAt` | Instant | When the row was last updated — set automatically by JPA auditing |
 
 ### Policy — `policies` table
 
@@ -289,6 +291,8 @@ If an exception is thrown anywhere in steps 6–8, the `@RestControllerAdvice` (
 | `startDate` | Date | Coverage start date |
 | `endDate` | Date | Coverage end date |
 | `client` | Client | The client this policy belongs to (FK: `client_id`) |
+| `createdAt` | Instant | When the row was created — set automatically by JPA auditing |
+| `updatedAt` | Instant | When the row was last updated — set automatically by JPA auditing |
 
 ### Relationships
 
@@ -901,16 +905,26 @@ The database schema is owned by **Flyway**, not by Hibernate. Instead of letting
 1. **Never edit an applied migration.** `V1__init.sql` is frozen. Every change goes in a new file (`V2__…`, `V3__…`).
 2. **Every entity change needs a migration.** Because of `validate`, if you add/alter a field on an `@Entity` without a matching migration, the app won't start — by design. This keeps Java and the database deliberately in sync.
 
-### Example: adding a new migration
+### `V2__add_audit_columns.sql` — audit timestamps
 
-To add audit columns to `policies`, create `src/main/resources/db/migration/V2__add_audit_columns.sql`:
+[`V2__add_audit_columns.sql`](src/main/resources/db/migration/V2__add_audit_columns.sql) adds `created_at` / `updated_at` to both `clients` and `policies`:
 
 ```sql
-ALTER TABLE policies ADD COLUMN created_at TIMESTAMP;
-ALTER TABLE policies ADD COLUMN updated_at TIMESTAMP;
+ALTER TABLE clients  ADD COLUMN created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE clients  ADD COLUMN updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE policies ADD COLUMN created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP;
+ALTER TABLE policies ADD COLUMN updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP;
 ```
 
-On the next start, Flyway applies `V2` to any database still at `V1` (and runs `V1` then `V2` on a brand-new database).
+On the next start, Flyway applies `V2` to any database still at `V1` (and runs `V1` then `V2` on a brand-new database). `DEFAULT CURRENT_TIMESTAMP` backfills any rows that already exist so the `NOT NULL` constraint holds.
+
+These columns are **filled in automatically** by Spring Data JPA auditing — you never set them by hand:
+
+- [`Auditable`](src/main/java/com/pc/pc/entity/Auditable.java) is a `@MappedSuperclass` holding the two fields, annotated `@CreatedDate` / `@LastModifiedDate`. `Client` and `Policy` extend it, so the columns aren't duplicated across entities.
+- [`JpaAuditingConfig`](src/main/java/com/pc/pc/config/JpaAuditingConfig.java) (`@EnableJpaAuditing`) is the switch that turns the feature on: `createdAt` is set once on insert, `updatedAt` on every save.
+- Both fields are returned by the response DTOs, so the API exposes them.
+
+> **Portability note:** the migration uses one `ALTER` per column and `CURRENT_TIMESTAMP` (not Postgres-only multi-column `ALTER` / `now()`) because the **test suite runs Flyway against in-memory H2** while production is PostgreSQL — migrations must parse on both. Until integration tests move to Testcontainers (a real Postgres), keep migration SQL portable.
 
 ### The existing production database
 

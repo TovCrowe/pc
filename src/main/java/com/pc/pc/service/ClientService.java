@@ -78,7 +78,9 @@ public class ClientService {
                 client.getName(),
                 client.getLastName(),
                 client.getEmail(),
-                client.getPhone()
+                client.getPhone(),
+                client.getCreatedAt(),
+                client.getUpdatedAt()
         );
     }
 }

@@ -5,6 +5,7 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.time.Instant;
 import java.util.Date;
 
 @Data
@@ -24,4 +25,6 @@ public class PolicyResponseDTO {
     private Date endDate;
     private Long clientId;
     private String clientName;
+    private Instant createdAt;
+    private Instant updatedAt;
 }
